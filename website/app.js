@@ -7,13 +7,12 @@
 // Place your Stripe Payment Link OR Price ID & Publishable Key below
 // --------------------------------------------------------------------------
 const STRIPE_CONFIG = {
-    // OPTION A: If using a Stripe Payment Link (Recommended for simplest setup)
-    // Example: "https://buy.stripe.com/test_12345"
-    paymentLinkUrl: "https://buy.stripe.com/5kAbITc3W17o8126oo", 
+    // Live Stripe Payment Link for $5 USD Tradalgo Lifetime License
+    paymentLinkUrl: "https://buy.stripe.com/14AdRb4F44mk1b2bhYdby00", 
 
-    // OPTION B: If using Stripe Checkout API (Client-side redirect)
-    publishableKey: "pk_test_TYooMQauvdEDq54NiTphI7jx", // Replace with your pk_live_... or pk_test_...
-    priceId: "price_1PXXXXXXXXXXXXXX" // Replace with your Stripe Price ID for $5 USD
+    // Optional fallback Stripe Checkout API parameters
+    publishableKey: "", 
+    priceId: "" 
 };
 
 document.addEventListener('DOMContentLoaded', () => {
