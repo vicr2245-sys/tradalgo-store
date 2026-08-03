@@ -256,6 +256,7 @@ h1, h2, h3, h4, h5, h6 {
     align-items: center;
     gap: 0.7rem;
     text-decoration: none;
+    margin-right: 3.5rem;
 }
 
 .logo-icon {
@@ -1193,6 +1194,7 @@ input[type="range"]::-webkit-slider-thumb {
 .pricing-card-wrapper {
     display: flex;
     justify-content: center;
+    margin-bottom: 5rem;
 }
 
 .pricing-card {
