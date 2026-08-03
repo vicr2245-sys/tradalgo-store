@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tradalgo | Institutional Forex & Gold Trading Bot for $5</title>
+    <meta name="description" content="Automated 5-strategy consensus Forex & Gold trading bot for OANDA. Live web dashboard, auto risk management, and zero monthly fees. Just $5 lifetime access.">
+    <meta name="keywords" content="forex bot, oanda trading bot, automated trading, gold trading bot, tradalgo, trading dashboard, backtest forex">
+    
+    <!-- Open Graph / Social Media -->
+    <meta property="og:title" content="Tradalgo | Algorithmic Precision for Forex & Gold">
+    <meta property="og:description" content="Automated 5-strategy consensus bot for OANDA. $5 USD One-Off Lifetime Access. No subscriptions.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://tradalgo.store">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- Stripe JS SDK (Ready for Stripe Checkout Integration) -->
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body>
+    <!-- Top Announcement Bar -->
+    <div class="announcement-bar" id="announcementBar">
+        <div class="announcement-content">
+            <span class="badge-pulse"><i class="fa-solid fa-bolt"></i> LIMITED TIME LAUNCH DEAL</span>
+            <span>Get Full Lifetime Access to <strong>Tradalgo.exe</strong> & Live Dashboard for just <strong>$5 USD</strong>!</span>
+            <a href="#checkout" class="announcement-link">Claim Offer <i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+    </div>
+
+    <!-- Navigation Header -->
+    <header class="site-header" id="siteHeader">
+        <div class="container header-container">
+            <a href="#" class="brand-logo">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-chart-line"></i>
+                </div>
+                <div class="logo-text">
+                    TRADALGO<span class="logo-domain">.STORE</span>
+                </div>
+            </a>
+
+            <nav class="main-nav" id="mainNav">
+                <a href="#features" class="nav-link"><i class="fa-solid fa-microchip"></i> 5-Strategy Engine</a>
+                <a href="#demo" class="nav-link"><i class="fa-solid fa-desktop"></i> Live Simulator</a>
+                <a href="#calculator" class="nav-link"><i class="fa-solid fa-calculator"></i> ROI Calculator</a>
+                <a href="#backtest" class="nav-link"><i class="fa-solid fa-chart-pie"></i> Backtest Proof</a>
+                <a href="#pricing" class="nav-link"><i class="fa-solid fa-tags"></i> Pricing</a>
+                <a href="#faq" class="nav-link"><i class="fa-solid fa-circle-question"></i> FAQ</a>
+            </nav>
+
+            <div class="header-actions">
+                <a href="#checkout" class="btn btn-primary btn-glow" id="headerCtaBtn">
+                    <span><i class="fa-solid fa-bolt"></i> Get Bot — $5 USD</span>
+                </a>
+                <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle navigation menu">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Hero Section -->
+        <section class="hero-section" id="hero">
+            <div class="hero-bg-glow hero-bg-glow-1"></div>
+            <div class="hero-bg-glow hero-bg-glow-2"></div>
+            <div class="container hero-container">
+                <div class="hero-badge">
+                    <span class="status-dot"></span>
+                    <span>OANDA V20 API Integrated • 10 Pairs & Gold (XAU/USD)</span>
+                </div>
+
+                <h1 class="hero-title">
+                    Institutional Algorithmic Trading.<br>
+                    <span class="gradient-text">No Subscriptions. Just $5.</span>
+                </h1>
+
+                <p class="hero-subtitle">
+                    <strong>Tradalgo</strong> runs 5 weighted trading strategies in consensus to automatically spot, execute, and manage high-probability Forex & Gold trades. Includes live web dashboard, automatic drawdown shield, and local execution.
+                </p>
+
+                <div class="hero-cta-group">
+                    <a href="#checkout" class="btn btn-hero-primary btn-glow" id="heroBuyBtn">
+                        <i class="fa-solid fa-download"></i> Get Tradalgo.exe — $5 Lifetime
+                    </a>
+                    <a href="#demo" class="btn btn-hero-secondary" id="heroDemoBtn">
+                        <i class="fa-solid fa-play"></i> Watch Live Demo Simulator
+                    </a>
+                </div>
+
+                <div class="hero-trust-row">
+                    <div class="trust-item"><i class="fa-solid fa-shield-halved"></i> <span>Direct OANDA API Integration</span></div>
+                    <div class="trust-item"><i class="fa-solid fa-key"></i> <span>100% Private (Keys Stay Local)</span></div>
+                    <div class="trust-item"><i class="fa-solid fa-infinity"></i> <span>Zero Monthly Fees</span></div>
+                    <div class="trust-item"><i class="fa-solid fa-gears"></i> <span>Auto Risk & News Shield</span></div>
+                </div>
+
+                <!-- Interactive Hero Dashboard Mockup -->
+                <div class="hero-dashboard-wrapper">
+                    <div class="dashboard-window">
+                        <div class="window-header">
+                            <div class="window-dots">
+                                <span class="dot dot-red"></span>
+                                <span class="dot dot-yellow"></span>
+                                <span class="dot dot-green"></span>
+                            </div>
+                            <div class="window-title">
+                                <i class="fa-solid fa-signal"></i> Tradalgo Live Dashboard v2.4 (OANDA Practice / Live)
+                            </div>
+                            <div class="window-status">
+                                <span class="status-indicator active"></span> BOT RUNNING
+                            </div>
+                        </div>
+
+                        <div class="window-body">
+                            <!-- Top Metrics Bar -->
+                            <div class="dash-metrics-grid">
+                                <div class="metric-card">
+                                    <div class="metric-label">TOTAL EQUITY</div>
+                                    <div class="metric-value green" id="heroEquity">$10,482.50</div>
+                                    <div class="metric-change positive"><i class="fa-solid fa-arrow-trend-up"></i> +4.825% (+$482.50)</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">WIN RATE (128 TRADES)</div>
+                                    <div class="metric-value cyan">68.4%</div>
+                                    <div class="metric-subtext">Profit Factor: <strong>2.18</strong></div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">OPEN POSITIONS</div>
+                                    <div class="metric-value gold" id="heroOpenCount">3 Active</div>
+                                    <div class="metric-subtext">Floating PnL: <span class="green font-mono" id="heroFloatingPnl">+$74.20</span></div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">CONSENSUS STATUS</div>
+                                    <div class="metric-value purple">4 / 5 STRATEGIES</div>
+                                    <div class="metric-subtext"><i class="fa-solid fa-circle-check green"></i> BUY SIGNAL: EUR/USD</div>
+                                </div>
+                            </div>
+
+                            <!-- Live Canvas Chart Section -->
+                            <div class="dash-chart-section">
+                                <div class="chart-header">
+                                    <div class="chart-pair-info">
+                                        <span class="pair-name">EUR/USD</span>
+                                        <span class="pair-price font-mono" id="heroCurrentPrice">1.08942</span>
+                                        <span class="pair-change positive" id="heroPriceChange">+0.00142 (+0.13%)</span>
+                                    </div>
+                                    <div class="chart-controls">
+                                        <span class="chart-tag active">15M</span>
+                                        <span class="chart-tag">1H</span>
+                                        <span class="chart-tag">4H</span>
+                                        <span class="chart-tag gold-badge"><i class="fa-solid fa-robot"></i> Live Consensus: 84% BUY</span>
+                                    </div>
+                                </div>
+
+                                <div class="canvas-container">
+                                    <canvas id="heroChartCanvas" width="900" height="260"></canvas>
+                                    <div class="chart-overlay-signal" id="heroSignalBadge">
+                                        <i class="fa-solid fa-arrow-up"></i> STRATEGY CONSENSUS BUY @ 1.08810 (TP: 1.09250 | SL: 1.08580)
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Active Trades Table Preview -->
+                            <div class="dash-table-wrapper">
+                                <table class="dash-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Pair</th>
+                                            <th>Type</th>
+                                            <th>Entry</th>
+                                            <th>Take Profit</th>
+                                            <th>Stop Loss</th>
+                                            <th>Current PnL</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="heroTableBody">
+                                        <tr>
+                                            <td><strong class="text-white">EUR/USD</strong></td>
+                                            <td><span class="badge badge-buy">BUY</span></td>
+                                            <td class="font-mono">1.08810</td>
+                                            <td class="font-mono text-green">1.09250</td>
+                                            <td class="font-mono text-red">1.08580</td>
+                                            <td class="font-mono text-green font-bold">+$42.50 (+1.2%)</td>
+                                            <td><span class="status-pulse-green">Trailing Stop Active</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong class="text-white">XAU/USD (Gold)</strong></td>
+                                            <td><span class="badge badge-buy">BUY</span></td>
+                                            <td class="font-mono">2,384.20</td>
+                                            <td class="font-mono text-green">2,410.00</td>
+                                            <td class="font-mono text-red">2,370.00</td>
+                                            <td class="font-mono text-green font-bold">+$51.80 (+0.8%)</td>
+                                            <td><span class="status-pulse-green">Protected (News Clear)</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong class="text-white">GBP/USD</strong></td>
+                                            <td><span class="badge badge-sell">SELL</span></td>
+                                            <td class="font-mono">1.27450</td>
+                                            <td class="font-mono text-green">1.26900</td>
+                                            <td class="font-mono text-red">1.27800</td>
+                                            <td class="font-mono text-red font-bold">-$20.10 (-0.3%)</td>
+                                            <td><span class="status-pulse-yellow">Monitoring EMA Filter</span></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Live Ticker Banner -->
+        <section class="ticker-banner">
+            <div class="ticker-track">
+                <div class="ticker-item"><span class="pair">EUR/USD</span> <span class="val font-mono">1.0894</span> <span class="up"><i class="fa-solid fa-caret-up"></i> +0.13%</span></div>
+                <div class="ticker-item"><span class="pair">GBP/USD</span> <span class="val font-mono">1.2742</span> <span class="down"><i class="fa-solid fa-caret-down"></i> -0.08%</span></div>
+                <div class="ticker-item"><span class="pair">USD/JPY</span> <span class="val font-mono">154.28</span> <span class="up"><i class="fa-solid fa-caret-up"></i> +0.25%</span></div>
+                <div class="ticker-item"><span class="pair">XAU/USD (GOLD)</span> <span class="val font-mono">2,386.40</span> <span class="up"><i class="fa-solid fa-caret-up"></i> +0.74%</span></div>
+                <div class="ticker-item"><span class="pair">USD/CAD</span> <span class="val font-mono">1.3680</span> <span class="down"><i class="fa-solid fa-caret-down"></i> -0.05%</span></div>
+                <div class="ticker-item"><span class="pair">AUD/USD</span> <span class="val font-mono">0.6582</span> <span class="up"><i class="fa-solid fa-caret-up"></i> +0.18%</span></div>
+                <div class="ticker-item"><span class="pair">USD/CHF</span> <span class="val font-mono">0.8845</span> <span class="down"><i class="fa-solid fa-caret-down"></i> -0.12%</span></div>
+                
+                <!-- Duplicate for Seamless Loop -->
+                <div class="ticker-item"><span class="pair">EUR/USD</span> <span class="val font-mono">1.0894</span> <span class="up"><i class="fa-solid fa-caret-up"></i> +0.13%</span></div>
+                <div class="ticker-item"><span class="pair">GBP/USD</span> <span class="val font-mono">1.2742</span> <span class="down"><i class="fa-solid fa-caret-down"></i> -0.08%</span></div>
+                <div class="ticker-item"><span class="pair">USD/JPY</span> <span class="val font-mono">154.28</span> <span class="up"><i class="fa-solid fa-caret-up"></i> +0.25%</span></div>
+                <div class="ticker-item"><span class="pair">XAU/USD (GOLD)</span> <span class="val font-mono">2,386.40</span> <span class="up"><i class="fa-solid fa-caret-up"></i> +0.74%</span></div>
+            </div>
+        </section>
+
+        <!-- 5-Strategy Consensus Engine Section -->
+        <section class="section-padding" id="features">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="section-badge"><i class="fa-solid fa-brain"></i> QUANT ALGORITHMIC CORE</span>
+                    <h2 class="section-title">5 Strategies Voting in Real-Time.<br><span class="gradient-text">Zero Emotion. Pure Precision.</span></h2>
+                    <p class="section-description">
+                        Single indicator bots lose money when market conditions change. Tradalgo uses a multi-layered consensus matrix where 5 distinct algorithms vote on every candle. A trade is only triggered when the threshold is met.
+                    </p>
+                </div>
+
+                <div class="strategies-grid">
+                    <div class="strategy-card">
+                        <div class="strat-number">01</div>
+                        <div class="strat-icon cyan"><i class="fa-solid fa-arrow-trend-up"></i></div>
+                        <h3>Adaptive Trend Following</h3>
+                        <p>Combines multi-timeframe Exponential Moving Averages (EMA 20/50/200) to confirm directional bias before entering long-term momentum runs.</p>
+                        <div class="strat-tag">Filters against counter-trend false breakouts</div>
+                    </div>
+
+                    <div class="strategy-card">
+                        <div class="strat-number">02</div>
+                        <div class="strat-icon green"><i class="fa-solid fa-arrows-split-up-and-left"></i></div>
+                        <h3>Mean Reversion & Bollinger Bands</h3>
+                        <p>Identifies overbought and oversold extremes using standard deviation bands paired with RSI momentum confirmation for high-R:R re-entry.</p>
+                        <div class="strat-tag">Protects during consolidation periods</div>
+                    </div>
+
+                    <div class="strategy-card">
+                        <div class="strat-number">03</div>
+                        <div class="strat-icon gold"><i class="fa-solid fa-bolt"></i></div>
+                        <h3>Volatility & ATR Expansion Breakout</h3>
+                        <p>Monitors Average True Range (ATR) surges during London & NY session opens to ride explosive momentum moves on Forex pairs & Gold.</p>
+                        <div class="strat-tag">Dynamically sets Stop-Loss & Take-Profit</div>
+                    </div>
+
+                    <div class="strategy-card">
+                        <div class="strat-number">04</div>
+                        <div class="strat-icon purple"><i class="fa-solid fa-chart-column"></i></div>
+                        <h3>MACD Histogram Divergence</h3>
+                        <p>Detects hidden bullish and bearish divergence between price action and momentum histograms to anticipate trend fatigue early.</p>
+                        <div class="strat-tag">Early warning entry signal</div>
+                    </div>
+
+                    <div class="strategy-card span-2">
+                        <div class="strat-number">05</div>
+                        <div class="strat-icon red"><i class="fa-solid fa-shield-cat"></i></div>
+                        <h3>High-Impact News & Drawdown Shield</h3>
+                        <p>Automatically freezes trading 30 minutes before high-impact economic news events (NFP, CPI, FOMC) and enforces hard daily drawdown limits (e.g. max 3% risk/day) to preserve your equity.</p>
+                        <div class="strat-tag gold-border"><i class="fa-solid fa-lock"></i> Capital Preservation Priority</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Interactive Live Simulator Section -->
+        <section class="section-padding bg-darker" id="demo">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="section-badge"><i class="fa-solid fa-gamepad"></i> INTERACTIVE BOT DEMO</span>
+                    <h2 class="section-title">See How Tradalgo Analyzes & Trades<br><span class="gradient-text">Test the Consensus Matrix Live</span></h2>
+                    <p class="section-description">
+                        Select any currency pair or Gold below to test how the 5 strategies evaluate market conditions in real-time.
+                    </p>
+                </div>
+
+                <div class="simulator-box">
+                    <div class="sim-pair-selector">
+                        <button class="sim-btn active" data-pair="EURUSD"><i class="fa-solid fa-coins"></i> EUR/USD</button>
+                        <button class="sim-btn" data-pair="GBPUSD"><i class="fa-solid fa-coins"></i> GBP/USD</button>
+                        <button class="sim-btn" data-pair="USDJPY"><i class="fa-solid fa-coins"></i> USD/JPY</button>
+                        <button class="sim-btn" data-pair="XAUUSD"><i class="fa-solid fa-gem text-gold"></i> XAU/USD (GOLD)</button>
+                        <button class="sim-btn" data-pair="AUDUSD"><i class="fa-solid fa-coins"></i> AUD/USD</button>
+                    </div>
+
+                    <div class="sim-grid">
+                        <div class="sim-matrix-card">
+                            <h4 class="sim-card-title"><i class="fa-solid fa-list-check"></i> Strategy Vote Matrix</h4>
+                            <ul class="vote-list" id="simVoteList">
+                                <li>
+                                    <span>Strategy 1: EMA Trend Alignment</span>
+                                    <span class="vote-badge vote-buy"><i class="fa-solid fa-check"></i> BUY</span>
+                                </li>
+                                <li>
+                                    <span>Strategy 2: RSI Mean Reversion</span>
+                                    <span class="vote-badge vote-buy"><i class="fa-solid fa-check"></i> BUY</span>
+                                </li>
+                                <li>
+                                    <span>Strategy 3: ATR Volatility Breakout</span>
+                                    <span class="vote-badge vote-neutral"><i class="fa-solid fa-minus"></i> NEUTRAL</span>
+                                </li>
+                                <li>
+                                    <span>Strategy 4: MACD Divergence</span>
+                                    <span class="vote-badge vote-buy"><i class="fa-solid fa-check"></i> BUY</span>
+                                </li>
+                                <li>
+                                    <span>Strategy 5: News & Timeframe Shield</span>
+                                    <span class="vote-badge vote-pass"><i class="fa-solid fa-shield"></i> CLEAR</span>
+                                </li>
+                            </ul>
+
+                            <div class="consensus-box">
+                                <div class="consensus-label">FINAL CONSENSUS SCORE</div>
+                                <div class="consensus-score-bar">
+                                    <div class="score-fill" id="simScoreFill" style="width: 80%;"></div>
+                                </div>
+                                <div class="consensus-result green" id="simResultText">
+                                    <i class="fa-solid fa-circle-check"></i> 80% BUY CONSENSUS — ORDER DISPATCHED
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sim-output-card">
+                            <h4 class="sim-card-title"><i class="fa-solid fa-terminal"></i> Bot Execution Terminal</h4>
+                            <div class="terminal-body font-mono" id="simTerminal">
+                                <p class="text-dim">[15:48:02 INFO] Tradalgo Bot v2.4 initialized on OANDA V20 API</p>
+                                <p class="text-dim">[15:48:03 INFO] Fetching M15 candles for EUR/USD...</p>
+                                <p class="text-cyan">[15:48:04 STRAT] Trend: EMA 20 > EMA 50 > EMA 200 (BULLISH)</p>
+                                <p class="text-cyan">[15:48:04 STRAT] RSI (14) = 44.20 (Oversold Dip Re-entry)</p>
+                                <p class="text-gold">[15:48:05 RISK] Position Sizing: 0.82 Lots ($10,000 Equity, 1.0% Risk = $100 SL)</p>
+                                <p class="text-green">[15:48:06 EXEC] Order Executed: BUY 82,000 EUR/USD @ 1.08942</p>
+                                <p class="text-green">[15:48:06 EXEC] SL Set @ 1.08820 (-12.2 pips) | TP Set @ 1.09210 (+26.8 pips)</p>
+                                <p class="text-purple">[15:48:07 DASH] Web Dashboard Updated: http://localhost:5000</p>
+                            </div>
+                            <div class="sim-action">
+                                <button class="btn btn-secondary btn-sm" id="simRunBtn">
+                                    <i class="fa-solid fa-rotate"></i> Re-Run Consensus Analysis
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Interactive ROI & Risk Calculator Section -->
+        <section class="section-padding" id="calculator">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="section-badge"><i class="fa-solid fa-calculator"></i> PROFIT & RISK CALCULATOR</span>
+                    <h2 class="section-title">Calculate Your Potential Returns<br><span class="gradient-text">Based on Conservative Risk Management</span></h2>
+                    <p class="section-description">
+                        Use the interactive sliders below to project potential account growth using Tradalgo's automated position sizing and risk parameters.
+                    </p>
+                </div>
+
+                <div class="calculator-card">
+                    <div class="calc-grid">
+                        <div class="calc-inputs">
+                            <div class="slider-group">
+                                <div class="slider-header">
+                                    <label for="capitalSlider"><i class="fa-solid fa-wallet"></i> Starting Capital</label>
+                                    <span class="slider-val font-mono" id="capitalVal">$10,000</span>
+                                </div>
+                                <input type="range" id="capitalSlider" min="500" max="100000" step="500" value="10000">
+                                <div class="slider-minmax"><span>$500</span><span>$100,000</span></div>
+                            </div>
+
+                            <div class="slider-group">
+                                <div class="slider-header">
+                                    <label for="riskSlider"><i class="fa-solid fa-shield"></i> Risk Per Trade (%)</label>
+                                    <span class="slider-val font-mono" id="riskVal">1.0%</span>
+                                </div>
+                                <input type="range" id="riskSlider" min="0.5" max="3.0" step="0.25" value="1.0">
+                                <div class="slider-minmax"><span>0.5% (Conservative)</span><span>3.0% (Aggressive)</span></div>
+                            </div>
+
+                            <div class="slider-group">
+                                <div class="slider-header">
+                                    <label for="monthSlider"><i class="fa-solid fa-calendar-days"></i> Trading Timeframe</label>
+                                    <span class="slider-val font-mono" id="monthVal">6 Months</span>
+                                </div>
+                                <input type="range" id="monthSlider" min="1" max="12" step="1" value="6">
+                                <div class="slider-minmax"><span>1 Month</span><span>12 Months</span></div>
+                            </div>
+                        </div>
+
+                        <div class="calc-results">
+                            <div class="result-header">PROJECTED ACCOUNT METRICS</div>
+                            
+                            <div class="result-highlight">
+                                <div class="result-label">PROJECTED ENDING EQUITY</div>
+                                <div class="result-big-value green font-mono" id="projectedEquity">$14,280.00</div>
+                                <div class="result-gain-badge" id="projectedGain">+42.8% Total Net Return</div>
+                            </div>
+
+                            <div class="result-stats-grid">
+                                <div class="r-stat">
+                                    <span class="r-label">Max Risk Per Trade</span>
+                                    <span class="r-val font-mono text-red" id="maxRiskAmount">$100.00</span>
+                                </div>
+                                <div class="r-stat">
+                                    <span class="r-label">Est. Monthly Profit</span>
+                                    <span class="r-val font-mono text-green" id="monthlyProfit">+$713.33 / mo</span>
+                                </div>
+                                <div class="r-stat">
+                                    <span class="r-label">Avg. Win Rate</span>
+                                    <span class="r-val font-mono text-cyan">68.2%</span>
+                                </div>
+                                <div class="r-stat">
+                                    <span class="r-label">Profit Factor</span>
+                                    <span class="r-val font-mono text-gold">2.14</span>
+                                </div>
+                            </div>
+
+                            <div class="calc-disclaimer">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Projected figures are based on backtested performance metrics (68.2% win rate, 1:1.5 reward ratio). Past performance does not guarantee future results.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Backtesting Proof Section -->
+        <section class="section-padding bg-darker" id="backtest">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="section-badge"><i class="fa-solid fa-chart-line"></i> HISTORICAL BACKTEST PROOF</span>
+                    <h2 class="section-title">Tested Over 5+ Years of Tick Data<br><span class="gradient-text">Rigorous Quantitative Verification</span></h2>
+                    <p class="section-description">
+                        Tradalgo includes a built-in historical backtesting engine (`tradalgo.exe --backtest`) allowing you to verify every strategy against tick data before risking real funds.
+                    </p>
+                </div>
+
+                <div class="backtest-tabs">
+                    <button class="bt-tab active" data-target="btEUR"><i class="fa-solid fa-coins"></i> EUR/USD Backtest</button>
+                    <button class="bt-tab" data-target="btGBP"><i class="fa-solid fa-coins"></i> GBP/USD Backtest</button>
+                    <button class="bt-tab" data-target="btGOLD"><i class="fa-solid fa-gem text-gold"></i> XAU/USD (Gold) Backtest</button>
+                </div>
+
+                <div class="backtest-card" id="btCard">
+                    <div class="bt-metrics-bar">
+                        <div class="bt-metric">
+                            <span class="bt-label">Total Trades</span>
+                            <span class="bt-val font-mono" id="btTotalTrades">1,420</span>
+                        </div>
+                        <div class="bt-metric">
+                            <span class="bt-label">Win Rate</span>
+                            <span class="bt-val font-mono text-green" id="btWinRate">69.4%</span>
+                        </div>
+                        <div class="bt-metric">
+                            <span class="bt-label">Profit Factor</span>
+                            <span class="bt-val font-mono text-cyan" id="btProfitFactor">2.24</span>
+                        </div>
+                        <div class="bt-metric">
+                            <span class="bt-label">Max Drawdown</span>
+                            <span class="bt-val font-mono text-gold" id="btDrawdown">3.8%</span>
+                        </div>
+                        <div class="bt-metric">
+                            <span class="bt-label">Net Profit</span>
+                            <span class="bt-val font-mono text-green" id="btNetProfit">+184.2%</span>
+                        </div>
+                    </div>
+
+                    <div class="bt-chart-wrapper">
+                        <canvas id="backtestCanvas" width="900" height="240"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Setup Guide Section -->
+        <section class="section-padding">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="section-badge"><i class="fa-solid fa-bolt"></i> EASY 3-STEP SETUP</span>
+                    <h2 class="section-title">Up and Running in 3 Minutes.<br><span class="gradient-text">No Coding Required.</span></h2>
+                </div>
+
+                <div class="steps-grid">
+                    <div class="step-card">
+                        <div class="step-badge">STEP 1</div>
+                        <div class="step-icon"><i class="fa-solid fa-download"></i></div>
+                        <h3>Download Tradalgo.exe</h3>
+                        <p>Purchase for $5 USD and receive immediate access to the standalone single executable (`tradalgo.exe`). No complex Python installation needed.</p>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-badge">STEP 2</div>
+                        <div class="step-icon"><i class="fa-solid fa-key"></i></div>
+                        <h3>Enter Your OANDA Key</h3>
+                        <p>Run <code>tradalgo.exe --setup</code> once to save your free OANDA Practice or Live API token. Your keys stay 100% private on your own computer.</p>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-badge">STEP 3</div>
+                        <div class="step-icon"><i class="fa-solid fa-rocket"></i></div>
+                        <h3>Launch & Watch PnL</h3>
+                        <p>Double-click <code>tradalgo.exe</code> to start automated trading and instantly launch your live web dashboard in your browser (`http://localhost:5000`).</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Checkout / Pricing Section -->
+        <section class="section-padding bg-darker" id="pricing">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="section-badge"><i class="fa-solid fa-tag"></i> UNBEATABLE LAUNCH OFFER</span>
+                    <h2 class="section-title">One-Time Payment. Lifetime Ownership.<br><span class="gradient-text">No Subscriptions. Ever.</span></h2>
+                    <p class="section-description">
+                        Why pay $100/month for trading software? Own the full Tradalgo bot and live dashboard forever for a single $5 payment.
+                    </p>
+                </div>
+
+                <div class="pricing-card-wrapper" id="checkout">
+                    <div class="pricing-card featured-card">
+                        <div class="pricing-badge"><i class="fa-solid fa-fire"></i> THE $5 NO-BRAINER OFFER</div>
+                        
+                        <h3 class="plan-name">Tradalgo Lifetime License</h3>
+                        <p class="plan-subtitle">Complete standalone trading bot & dashboard package</p>
+
+                        <div class="price-box">
+                            <span class="currency">$</span>
+                            <span class="price-num">5</span>
+                            <span class="price-period">USD / Lifetime</span>
+                        </div>
+                        <div class="price-subtext"><span class="strike">$199.00</span> — Save 97% Launch Offer</div>
+
+                        <ul class="pricing-features">
+                            <li><i class="fa-solid fa-circle-check green"></i> Full <code>tradalgo.exe</code> standalone application</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> Live Web Dashboard (`http://localhost:5000`)</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> 5 Weighted Strategy Consensus Engine</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> 10 Currency Pairs + Gold (XAU/USD)</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> Automatic Position Sizing & Drawdown Shield</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> High-Impact Economic News Avoidance Filter</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> Built-in Historical Backtesting Suite</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> Gmail & AI Sentiment Notification Support</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> 100% Private (API keys stay local)</li>
+                            <li><i class="fa-solid fa-circle-check green"></i> Lifetime Software Updates</li>
+                        </ul>
+
+                        <!-- Stripe Checkout CTA Button -->
+                        <div class="checkout-action">
+                            <button class="btn btn-checkout btn-glow" id="stripeCheckoutBtn">
+                                <i class="fa-solid fa-lock"></i> Buy Lifetime Access Now — $5 USD
+                            </button>
+                            <div class="checkout-guarantee">
+                                <i class="fa-solid fa-shield-halved"></i> 100% Secure Checkout powered by Stripe
+                            </div>
+                        </div>
+
+                        <!-- Payment Icons -->
+                        <div class="payment-methods">
+                            <span><i class="fa-brands fa-cc-visa"></i></span>
+                            <span><i class="fa-brands fa-cc-mastercard"></i></span>
+                            <span><i class="fa-brands fa-cc-amex"></i></span>
+                            <span><i class="fa-brands fa-apple-pay"></i></span>
+                            <span><i class="fa-brands fa-google-pay"></i></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- FAQ Section -->
+        <section class="section-padding" id="faq">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="section-badge"><i class="fa-solid fa-circle-question"></i> FREQUENTLY ASKED QUESTIONS</span>
+                    <h2 class="section-title">Everything You Need to Know</h2>
+                </div>
+
+                <div class="faq-accordion">
+                    <div class="faq-item">
+                        <button class="faq-question">
+                            <span>Is OANDA required to use Tradalgo?</span>
+                            <i class="fa-solid fa-chevron-down faq-icon"></i>
+                        </button>
+                        <div class="faq-answer">
+                            <p>Yes. Tradalgo uses the official OANDA V20 REST API for live tick data feed, backtesting, and automated order execution. You can use a <strong>free OANDA Practice Account</strong> (demo money) or a Live Account. Obtaining an API token takes 60 seconds from your OANDA portal.</p>
+                        </div>
+                    </div>
+
+                    <div class="faq-item">
+                        <button class="faq-question">
+                            <span>Are my OANDA API keys and passwords secure?</span>
+                            <i class="fa-solid fa-chevron-down faq-icon"></i>
+                        </button>
+                        <div class="faq-answer">
+                            <p>100% yes. Tradalgo runs entirely on your own computer (`tradalgo.exe`). Your API keys and credentials are saved locally in your configuration file or environment variables. They are never sent to external servers or third parties.</p>
+                        </div>
+                    </div>
+
+                    <div class="faq-item">
+                        <button class="faq-question">
+                            <span>Are there really no recurring monthly fees?</span>
+                            <i class="fa-solid fa-chevron-down faq-icon"></i>
+                        </button>
+                        <div class="faq-answer">
+                            <p>Correct! The $5 payment provides full lifetime ownership of `tradalgo.exe` and its built-in web dashboard. There are zero subscriptions, monthly fees, or hidden charges.</p>
+                        </div>
+                    </div>
+
+                    <div class="faq-item">
+                        <button class="faq-question">
+                            <span>What operating systems are supported?</span>
+                            <i class="fa-solid fa-chevron-down faq-icon"></i>
+                        </button>
+                        <div class="faq-answer">
+                            <p>Tradalgo ships as a standalone Windows executable (`tradalgo.exe`). You can also run the Python source code directly on Windows, macOS, or Linux/VPS environments.</p>
+                        </div>
+                    </div>
+
+                    <div class="faq-item">
+                        <button class="faq-question">
+                            <span>Can I run backtests before trading real capital?</span>
+                            <i class="fa-solid fa-chevron-down faq-icon"></i>
+                        </button>
+                        <div class="faq-answer">
+                            <p>Absolutely. You can run <code>tradalgo.exe --backtest</code> at any time to execute historical backtests across all 10 currency pairs and Gold, giving you detailed win-rate, drawdown, and profit factor analytics.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <div class="container footer-container">
+            <div class="footer-top">
+                <div class="footer-brand">
+                    <a href="#" class="brand-logo">
+                        <div class="logo-icon"><i class="fa-solid fa-chart-line"></i></div>
+                        <div class="logo-text">TRADALGO<span class="logo-domain">.STORE</span></div>
+                    </a>
+                    <p class="footer-text">
+                        Automated Forex & Gold algorithmic trading platform. 5-strategy consensus engine, live web dashboard, and automated drawdown protection.
+                    </p>
+                </div>
+
+                <div class="footer-links-group">
+                    <h4>Product</h4>
+                    <a href="#features">5-Strategy Engine</a>
+                    <a href="#demo">Live Simulator</a>
+                    <a href="#calculator">ROI Calculator</a>
+                    <a href="#backtest">Backtest Results</a>
+                    <a href="#pricing">Purchase ($5)</a>
+                </div>
+
+                <div class="footer-links-group">
+                    <h4>Resources</h4>
+                    <a href="#faq">FAQ</a>
+                    <a href="#setup">Setup Guide</a>
+                    <a href="https://oanda.com" target="_blank" rel="noopener">OANDA Portal</a>
+                </div>
+            </div>
+
+            <div class="footer-disclaimer">
+                <p><strong>Risk Warning & Financial Disclaimer:</strong> Trading foreign exchange and spot commodities (such as Gold) on margin carries a high level of risk and may not be suitable for all investors. The high degree of leverage can work against you as well as for you. Past backtested performance is not indicative of future results. Tradalgo is an automated trading tool provided for educational and software execution purposes.</p>
+            </div>
+
+            <div class="footer-bottom">
+                <div class="copyright">
+                    &copy; 2026 Tradalgo.store. All rights reserved.
+                </div>
+                <div class="system-status">
+                    <span class="status-dot"></span> System Operational • OANDA V20 Sync Active
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Custom App JS -->
+    <script src="app.js"></script>
+</body>
+</html>

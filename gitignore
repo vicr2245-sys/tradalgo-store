@@ -1,0 +1,10 @@
+# Tradalgo — secrets & runtime data. Never commit these.
+tradalgo_config.json
+tradalgo_data/
+*.spec
+build/
+dist/
+installer_output/
+__pycache__/
+*.pyc
+.env
