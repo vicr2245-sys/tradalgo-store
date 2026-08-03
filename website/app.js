@@ -39,37 +39,9 @@ function initStripeCheckout() {
     checkoutBtns.forEach(btn => {
         if (!btn) return;
         btn.addEventListener('click', (e) => {
-            // If button is a direct anchor link to #checkout, allow smooth scroll if not holding key
-            if (btn.getAttribute('href') === '#checkout') return;
-
             e.preventDefault();
-
-            // Priority 1: Use direct Stripe Payment Link if provided
-            if (STRIPE_CONFIG.paymentLinkUrl && STRIPE_CONFIG.paymentLinkUrl !== "https://buy.stripe.com/your-payment-link") {
+            if (STRIPE_CONFIG.paymentLinkUrl) {
                 window.location.href = STRIPE_CONFIG.paymentLinkUrl;
-                return;
-            }
-
-            // Priority 2: Use Stripe Checkout SDK with Price ID
-            if (window.Stripe && STRIPE_CONFIG.publishableKey && STRIPE_CONFIG.priceId) {
-                try {
-                    const stripe = Stripe(STRIPE_CONFIG.publishableKey);
-                    stripe.redirectToCheckout({
-                        lineItems: [{ price: STRIPE_CONFIG.priceId, quantity: 1 }],
-                        mode: 'payment',
-                        successUrl: window.location.origin + '/success.html',
-                        cancelUrl: window.location.href,
-                    }).then((result) => {
-                        if (result.error) {
-                            alert(result.error.message);
-                        }
-                    });
-                } catch (err) {
-                    console.error("Stripe initialization error:", err);
-                    showCheckoutModal();
-                }
-            } else {
-                showCheckoutModal();
             }
         });
     });

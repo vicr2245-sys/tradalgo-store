@@ -1,0 +1,10 @@
+{
+  "name": "tradalgo-store-website",
+  "version": "2.4.0",
+  "private": true,
+  "description": "Official Tradalgo.store website & Stripe webhook serverless backend",
+  "main": "api/webhook.js",
+  "dependencies": {
+    "stripe": "^14.0.0"
+  }
+}
