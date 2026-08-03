@@ -249,6 +249,7 @@ h1, h2, h3, h4, h5, h6 {
     align-items: center;
     justify-content: space-between;
     height: 75px;
+    gap: 1.5rem;
 }
 
 .brand-logo {
@@ -256,57 +257,74 @@ h1, h2, h3, h4, h5, h6 {
     align-items: center;
     gap: 0.7rem;
     text-decoration: none;
-    margin-right: 3.5rem;
+    flex-shrink: 0;
 }
 
 .logo-icon {
-    width: 42px;
-    height: 42px;
+    width: 40px;
+    height: 40px;
     background: linear-gradient(135deg, var(--cyan-main), var(--indigo-main));
     border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: #050B14;
-    font-size: 1.3rem;
+    font-size: 1.2rem;
     box-shadow: 0 0 15px var(--cyan-glow);
 }
 
 .logo-text {
     font-family: var(--font-heading);
     font-weight: 900;
-    font-size: 1.4rem;
+    font-size: 1.3rem;
     color: var(--text-white);
     letter-spacing: 0.5px;
+    white-space: nowrap;
 }
 
 .logo-domain {
     color: var(--cyan-main);
     font-weight: 500;
-    font-size: 1rem;
+    font-size: 0.95rem;
 }
 
 .main-nav {
     display: flex;
     align-items: center;
-    gap: 1.8rem;
+    gap: 1.2rem;
+    margin: 0 auto;
 }
 
 .nav-link {
     color: var(--text-muted);
     text-decoration: none;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     font-weight: 500;
     transition: var(--transition-fast);
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    white-space: nowrap;
 }
 
-.nav-link i { font-size: 0.85rem; opacity: 0.7; }
+.nav-link i { font-size: 0.82rem; opacity: 0.7; }
 
 .nav-link:hover {
     color: var(--cyan-main);
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+#headerCtaBtn {
+    white-space: nowrap;
+    padding: 0.65rem 1.4rem;
+    font-size: 0.92rem;
+    border-radius: 10px;
 }
 
 .mobile-toggle {
