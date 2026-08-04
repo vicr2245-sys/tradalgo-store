@@ -778,6 +778,169 @@ def performance_page():
     return render_template_string(PERF_HTML)
 
 
+SETTINGS_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tradalgo — Settings & Credentials</title>
+<style>
+:root {
+  --bg:#0b0e1a; --bg2:#111827; --bg3:#1a2035; --bg4:#1f2a40;
+  --border:#1e2d45; --text:#e2e8f0; --muted:#94A3B8; --dim:#64748B;
+  --accent:#00f2fe; --green:#10b981; --red:#ef4444; --gold:#f59e0b;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding-bottom:60px; }
+header { background:var(--bg2); border-bottom:1px solid var(--border); padding:0 24px; height:60px; display:flex; align-items:center; justify-content:space-between; }
+header .logo { font-size:16px; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px; }
+header .logo span { color:var(--accent); }
+nav a { color:var(--muted); text-decoration:none; margin-left:20px; font-size:13px; font-weight:600; padding:6px 12px; border-radius:6px; transition:all .2s; }
+nav a:hover, nav a.active { color:#fff; background:var(--bg3); }
+.container { max-width:900px; margin:30px auto; padding:0 20px; }
+.card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:24px; }
+.card-header { font-size:15px; font-weight:700; color:#fff; margin-bottom:16px; display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--border); padding-bottom:12px; }
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.form-group { display:flex; flex-direction:column; gap:6px; }
+.form-group.full { grid-column:span 2; }
+label { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
+input[type="text"], input[type="password"], input[type="number"], select {
+  background:var(--bg3); border:1px solid var(--border); color:#fff; padding:10px 14px; border-radius:8px; font-size:13px; font-family:inherit; outline:none; transition:border .2s;
+}
+input:focus, select:focus { border-color:var(--accent); }
+.btn-save { background:linear-gradient(135deg, var(--accent), #00a8ff); color:#050b14; border:none; padding:14px 28px; border-radius:8px; font-weight:800; font-size:14px; cursor:pointer; box-shadow:0 4px 15px rgba(0,242,254,0.3); transition:transform .2s; }
+.btn-save:hover { transform:translateY(-2px); }
+.toast { position:fixed; bottom:20px; right:20px; background:var(--green); color:#fff; padding:12px 24px; border-radius:8px; font-weight:700; display:none; box-shadow:0 10px 30px rgba(0,0,0,0.5); z-index:10000; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">⚡ TRADALGO <span>SETTINGS</span></div>
+  <nav>
+    <a href="/">Live</a>
+    <a href="/performance">Performance</a>
+    <a href="/settings" class="active">⚙️ Settings</a>
+  </nav>
+</header>
+<div class="container">
+  <form id="settingsForm">
+    <div class="card">
+      <div class="card-header">🔑 OANDA API Credentials</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>OANDA Account ID</label>
+          <input type="text" id="OANDA_ACCOUNT_ID" placeholder="101-004-XXXXXXXX-001">
+        </div>
+        <div class="form-group">
+          <label>OANDA Environment</label>
+          <select id="OANDA_ENV">
+            <option value="practice">Practice (Demo Account)</option>
+            <option value="live">Live (Real Account)</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <label>OANDA API Token</label>
+          <input type="password" id="OANDA_API_KEY" placeholder="Paste your OANDA API Key here">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">📧 Email Alerts & Notifications</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Sender Gmail</label>
+          <input type="text" id="EMAIL_SENDER" placeholder="your.email@gmail.com">
+        </div>
+        <div class="form-group">
+          <label>Recipient Email</label>
+          <input type="text" id="EMAIL_RECIPIENT" placeholder="your.email@gmail.com">
+        </div>
+        <div class="form-group full">
+          <label>Gmail App Password</label>
+          <input type="password" id="EMAIL_PASSWORD" placeholder="16-character App Password">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">⚡ Risk Management & Trading Limits</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Risk Per Trade (%)</label>
+          <input type="number" step="0.1" id="RISK_PER_TRADE_PCT" placeholder="1.0">
+        </div>
+        <div class="form-group">
+          <label>Max Simultaneous Open Trades</label>
+          <input type="number" id="MAX_OPEN_TRADES" placeholder="5">
+        </div>
+        <div class="form-group">
+          <label>Default Stop Loss (Pips)</label>
+          <input type="number" id="DEFAULT_SL_PIPS" placeholder="20">
+        </div>
+        <div class="form-group">
+          <label>Default Take Profit (Pips)</label>
+          <input type="number" id="DEFAULT_TP_PIPS" placeholder="40">
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:right;">
+      <button type="submit" class="btn-save">💾 Save & Apply Settings</button>
+    </div>
+  </form>
+</div>
+
+<div class="toast" id="toast">✓ Settings saved to config successfully!</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const res = await fetch('/api/config');
+    const cfg = await res.json();
+    for (const [k, v] of Object.entries(cfg)) {
+      const el = document.getElementById(k);
+      if (el) el.value = v;
+    }
+  } catch (err) {
+    console.error('Failed to load config:', err);
+  }
+});
+
+document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fields = ['OANDA_ACCOUNT_ID', 'OANDA_API_KEY', 'OANDA_ENV', 'EMAIL_SENDER', 'EMAIL_PASSWORD', 'EMAIL_RECIPIENT', 'RISK_PER_TRADE_PCT', 'MAX_OPEN_TRADES', 'DEFAULT_SL_PIPS', 'DEFAULT_TP_PIPS'];
+  const payload = {};
+  fields.forEach(f => {
+    const el = document.getElementById(f);
+    if (el && el.value !== '') {
+      payload[f] = el.type === 'number' ? parseFloat(el.value) : el.value;
+    }
+  });
+
+  const res = await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (res.ok) {
+    const toast = document.getElementById('toast');
+    toast.style.display = 'block';
+    setTimeout(() => { toast.style.display = 'none'; }, 3500);
+  }
+});
+</script>
+</body>
+</html>
+"""
+
+
+@app.route("/settings")
+def route_settings_page():
+    return Response(SETTINGS_HTML, mimetype="text/html; charset=utf-8")
+
+
 @app.route("/api/performance")
 def api_performance():
     """Full performance stats — period param: all, 30, 7, 1"""

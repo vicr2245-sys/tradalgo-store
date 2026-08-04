@@ -4501,6 +4501,12 @@ def route_backtest_page():
     return Response(_BACKTEST_HTML, mimetype="text/html; charset=utf-8")
 
 
+@app.route("/settings")
+def route_settings_page():
+    from flask import Response
+    return Response(_SETTINGS_HTML, mimetype="text/html; charset=utf-8")
+
+
 @app.route("/api/account")
 def route_account():
     try:
