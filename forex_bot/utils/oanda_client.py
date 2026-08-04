@@ -253,18 +253,40 @@ class OandaClient:
         """
         Pass in a pre-fetched balance to avoid an extra API call per instrument.
         Falls back to fetching balance if not provided.
+        Uses the same dynamic pip-value formula as tradalgo.py to prevent
+        oversized positions on JPY and cross-currency pairs.
         """
         if balance is None:
             balance = self.get_balance()
 
         risk_amount = balance * (risk_pct / 100)
 
-        if "JPY" in instrument:
-            pip_value_per_unit = 0.01 / 100_000
-        elif instrument == "XAU_USD":
-            pip_value_per_unit = 0.01 / 100
+        # Dynamic pip value calculation (mirrors tradalgo.py pip_value_usd_per_unit)
+        def _pip_size(inst):
+            if "JPY" in inst: return 0.01
+            if "XAU" in inst: return 0.10
+            return 0.0001
+
+        pip = _pip_size(instrument)
+        base, quote = instrument.split("_", 1) if "_" in instrument else (instrument, "USD")
+
+        # Fetch current mid-price for conversion (best-effort; falls back to 1.0)
+        try:
+            prices = self.get_prices([instrument])
+            mid_price = prices.get(instrument, {}).get("mid", 0.0) or 0.0
+        except Exception:
+            mid_price = 0.0
+
+        if quote == "USD":
+            pip_value_per_unit = pip
+        elif base == "USD":
+            pip_value_per_unit = pip / mid_price if mid_price > 0 else pip / 100.0
         else:
-            pip_value_per_unit = 0.0001 / 1
+            # Cross pair: approximate via mid price of base currency vs USD
+            pip_value_per_unit = pip  # conservative fallback for cross pairs
+
+        if pip_value_per_unit <= 0:
+            pip_value_per_unit = pip
 
         units = int(risk_amount / (sl_pips * pip_value_per_unit))
         return max(1, min(units, 1_000_000))

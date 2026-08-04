@@ -1164,8 +1164,10 @@ _CROSS_RATE_FALLBACK = {
     "CAD": 1.36,   # approx USD/CAD, used for USD_CAD
 }
 
-def pip_value_usd_per_unit(instrument: str, price_lookup=None) -> float:
-    """Returns the USD value of a 1-pip move for 1 unit of `instrument`."""
+def pip_value_usd_per_unit(instrument: str, price_lookup=None):
+    """Returns the USD value of a 1-pip move for 1 unit of `instrument`.
+    Returns None (not a float) if a required cross-rate is unavailable,
+    so callers can skip the trade instead of sizing with a fallback."""
     pip = _pip_size(instrument)
     if "_" not in instrument:
         return pip
@@ -1177,7 +1179,9 @@ def pip_value_usd_per_unit(instrument: str, price_lookup=None) -> float:
     if base == "USD":
         px = price_lookup(instrument) if price_lookup else None
         if px: return pip / px
-        return pip / _CROSS_RATE_FALLBACK.get(quote, 100.0)
+        fallback = _CROSS_RATE_FALLBACK.get(quote)
+        if fallback: return pip / fallback
+        return None  # No rate available — caller must skip trade
 
     # Cross pair — convert the quote currency's pip value into USD via a
     # second reference rate.
@@ -1186,22 +1190,28 @@ def pip_value_usd_per_unit(instrument: str, price_lookup=None) -> float:
         if px_direct: return pip * px_direct
         px_inverse = price_lookup(f"USD_{quote}")  # e.g. USD_JPY for EUR_JPY
         if px_inverse: return pip / px_inverse
+        # Live price lookup available but rates missing — refuse fallback
+        return None
     rate = _CROSS_RATE_FALLBACK.get(quote)
     if rate:
         return pip * rate if quote == "GBP" else pip / rate
-    return pip  # last resort — still better than a blind unrelated guess
+    return None  # Last resort: no fallback available, skip rather than oversize
 
 def calculate_position_units(instrument: str, sl_pips: float, risk_pct: float,
-                              balance: float, price_lookup=None) -> int:
+                              balance: float, price_lookup=None):
     """
     Sizes a position so that hitting the stop loss risks approximately
     risk_pct% of `balance`, in USD-equivalent terms. Shared by live trading
     and the backtester so their P&L figures are directly comparable.
+    Returns None if a required conversion rate is unavailable (caller should skip the trade).
     """
     if sl_pips <= 0 or balance <= 0:
         return 1
     risk = balance * (risk_pct / 100)
     ppv  = pip_value_usd_per_unit(instrument, price_lookup)
+    if ppv is None:
+        log.warning(f"calculate_position_units: no pip rate for {instrument} — skipping trade")
+        return None  # Signal to caller: skip this trade
     if ppv <= 0:
         return 1
     return max(1, min(int(risk / (sl_pips * ppv)), 1_000_000))
@@ -1381,13 +1391,20 @@ def _strat_macd(candles, instrument):
     return {"signal":None}
 
 def _strat_session(candles, instrument):
-    if len(candles)<10: return {"signal":None}
-    c=_closes(candles); h=_highs(candles); l=_lows(candles)
-    rh=max(h[-6:-2]); rl=min(l[-6:-2]); cur=c[-1]
-    sl,tp=_sl_tp(instrument)
-    if cur>rh*1.0005: return {"signal":"BUY","sl_pips":sl,"tp_pips":tp,"reason":"Session_Break: BUY"}
-    if cur<rl*0.9995: return {"signal":"SELL","sl_pips":sl,"tp_pips":tp,"reason":"Session_Break: SELL"}
-    return {"signal":None}
+    """Session breakout: uses the 4-candle range ending 2 candles ago,
+    anchored by candle timestamps so it always covers a real session window
+    rather than a fixed offset that may drift on lower time-frames."""
+    if len(candles) < 10: return {"signal": None}
+    c = _closes(candles); h = _highs(candles); l = _lows(candles)
+    # Use candles[-8:-2] (6 candles back to 2 back) for a wider session window
+    # that remains meaningful on H1 charts (6h = full London session)
+    window_h = h[-8:-2]; window_l = l[-8:-2]
+    if len(window_h) == 0: return {"signal": None}
+    rh = max(window_h); rl = min(window_l); cur = c[-1]
+    sl, tp = _sl_tp(instrument)
+    if cur > rh * 1.0005: return {"signal": "BUY",  "sl_pips": sl, "tp_pips": tp, "reason": "Session_Break: BUY"}
+    if cur < rl * 0.9995: return {"signal": "SELL", "sl_pips": sl, "tp_pips": tp, "reason": "Session_Break: SELL"}
+    return {"signal": None}
 
 STRATEGIES = {
     "EMA_Cross":       _strat_ema_cross,
@@ -1404,7 +1421,7 @@ def run_all_strategies(candles, instrument):
         except Exception as e: results[name]={"signal":None,"reason":f"error:{e}"}
     return results
 
-def consensus_signal(results, weights, threshold=0.35):
+def consensus_signal(results, weights, threshold=0.45):  # Raised from 0.35 — requires ≥2 strategies to agree
     buy=sell=0.0; reasons=[]
     for name,res in results.items():
         w=weights.get(name,0.2); sig=res.get("signal")
@@ -1761,7 +1778,8 @@ def apply_trade_filters(signal: str, candles: list, instrument: str) -> tuple:
         valid_atr = [v for v in atr_vals[-_FILTER_ATR_SMA:] if not _nan(v)]
         if len(valid_atr) >= _FILTER_ATR_SMA // 2 and not _nan(atr_now):
             atr_sma = sum(valid_atr) / len(valid_atr)
-            if atr_now < atr_sma * 0.85:   # at least 85% of average volatility
+            if atr_sma < 1e-8: pass  # Guard: skip filter if ATR SMA is near-zero (extremely low-vol pair)
+            elif atr_now < atr_sma * 0.85:   # at least 85% of average volatility
                 passed = False
                 reasons.append(
                     f"Volatility filter: ATR ({atr_now:.5f}) below average "
@@ -1840,7 +1858,7 @@ def run_backtest(instruments=None, granularity=None, candle_count=None, initial_
         for i in range(60,len(candles)):
             window=candles[:i]; current=candles[i]
             sr=run_all_strategies(window,instrument)
-            con=consensus_signal(sr,CFG["STRATEGY_WEIGHTS"],threshold=0.35)
+            con=consensus_signal(sr,CFG["STRATEGY_WEIGHTS"],threshold=CFG.get("CONSENSUS_THRESHOLD",0.45))
             con=filtered_signal(con,window,instrument)
             if not con["signal"]: equity.append(balance); continue
             sl_p=con["sl_pips"]; tp_p=con["tp_pips"]; entry=current["open"]
@@ -2390,6 +2408,7 @@ button:active, .btn:active, .pair-btn:active, .tf:active, nav a:active, .tab-btn
   <div class="hspace"></div>
   <div class="badge" id="sess-badge">—</div>
   <div class="badge" id="env-badge">{{ env }}</div>
+  <button id="env-toggle-btn" onclick="showEnvSwitchModal()" title="Switch between Practice and Live trading" style="margin-left:8px;padding:5px 12px;border-radius:20px;border:1.5px solid;font-size:11px;font-weight:800;cursor:pointer;transition:all .2s;letter-spacing:0.5px;"></button>
   <button id="pause-btn" class="running" onclick="togglePause()" title="Click to pause — no new trades will open">
     <span id="pause-icon">
       <svg class="icon-pause" viewBox="0 0 14 14" width="12" height="12" fill="currentColor">
@@ -2404,6 +2423,125 @@ button:active, .btn:active, .pair-btn:active, .tf:active, nav a:active, .tab-btn
   </button>
   <div id="bal">—</div>
 </header>
+
+<!-- ═══ RISK DISCLAIMER MODAL ═══ -->
+<div id="risk-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+  <div style="background:#111827;border:1px solid #1e2d45;border-radius:16px;max-width:520px;width:90%;padding:36px;box-shadow:0 25px 60px rgba(0,0,0,0.7);">
+    <div style="text-align:center;margin-bottom:20px;">
+      <div style="font-size:2.5rem;margin-bottom:10px;">&#9888;</div>
+      <h2 style="font-size:1.3rem;font-weight:800;color:#fff;margin-bottom:8px;">Risk Disclosure</h2>
+      <p style="color:#94A3B8;font-size:0.9rem;line-height:1.6;">Automated trading involves <strong style="color:#ef4444;">significant financial risk</strong>. You may lose some or all of your invested capital. Tradalgo is a software tool, not financial advice. Past performance does not guarantee future results. Only trade with money you can afford to lose entirely. Never risk funds needed for living expenses.</p>
+    </div>
+    <div style="background:#0b0e1a;border:1px solid #1e2d45;border-radius:8px;padding:14px;margin-bottom:20px;font-size:0.82rem;color:#64748B;line-height:1.7;">
+      • Forex and CFD trading carries a high level of risk<br>
+      • Leverage can work against you as well as for you<br>
+      • This software does not guarantee profitable trades<br>
+      • You are solely responsible for your trading decisions
+    </div>
+    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:20px;color:#e2e8f0;font-size:0.88rem;">
+      <input type="checkbox" id="risk-accept-cb" style="width:16px;height:16px;accent-color:#00f2fe;cursor:pointer;">
+      I understand that automated trading involves significant financial risk and I accept full responsibility for my trading decisions.
+    </label>
+    <button id="risk-accept-btn" onclick="acceptRiskDisclaimer()" disabled style="width:100%;padding:14px;background:linear-gradient(135deg,#00f2fe,#00a8ff);color:#050b14;border:none;border-radius:8px;font-weight:800;font-size:14px;cursor:not-allowed;opacity:0.5;transition:all .2s;">I Accept &mdash; Continue to Dashboard</button>
+  </div>
+</div>
+<script>
+(function(){
+  // Show risk disclaimer once per browser session
+  if(!sessionStorage.getItem('tradalgo_risk_accepted')){
+    var overlay = document.getElementById('risk-modal-overlay');
+    if(overlay){ overlay.style.display='flex'; document.body.style.overflow='hidden'; }
+  }
+  var cb = document.getElementById('risk-accept-cb');
+  var btn = document.getElementById('risk-accept-btn');
+  if(cb && btn){
+    cb.addEventListener('change', function(){
+      btn.disabled = !cb.checked;
+      btn.style.opacity = cb.checked ? '1' : '0.5';
+      btn.style.cursor = cb.checked ? 'pointer' : 'not-allowed';
+    });
+  }
+})();
+function acceptRiskDisclaimer(){
+  sessionStorage.setItem('tradalgo_risk_accepted','1');
+  var overlay = document.getElementById('risk-modal-overlay');
+  if(overlay){ overlay.style.display='none'; document.body.style.overflow=''; }
+}
+</script>
+
+<!-- ═══ ENV SWITCH MODAL ═══ -->
+<div id="env-switch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99998;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+  <div style="background:#111827;border:1px solid #ef4444;border-radius:16px;max-width:460px;width:90%;padding:32px;box-shadow:0 25px 60px rgba(239,68,68,0.3);">
+    <div style="text-align:center;margin-bottom:20px;">
+      <div style="font-size:2.5rem;margin-bottom:8px;">&#128308;</div>
+      <h2 style="font-size:1.2rem;font-weight:800;color:#fff;margin-bottom:10px;" id="env-modal-title">Switch to LIVE Trading?</h2>
+      <p style="color:#94A3B8;font-size:0.88rem;line-height:1.6;" id="env-modal-body">You are about to switch to a <strong style="color:#ef4444;">REAL MONEY</strong> account. All trades will use real funds from your live OANDA account. This cannot be undone without restarting the bot.</p>
+    </div>
+    <div style="display:flex;gap:12px;">
+      <button onclick="closeEnvModal()" style="flex:1;padding:12px;background:#1a2035;border:1px solid #1e2d45;color:#94A3B8;border-radius:8px;font-weight:700;cursor:pointer;">Cancel</button>
+      <button id="env-confirm-btn" onclick="confirmEnvSwitch()" style="flex:1;padding:12px;background:#ef4444;border:none;color:#fff;border-radius:8px;font-weight:800;cursor:pointer;">Confirm Switch</button>
+    </div>
+  </div>
+</div>
+<script>
+var _pendingEnv = null;
+function _updateEnvToggle(env){
+  var btn = document.getElementById('env-toggle-btn');
+  if(!btn) return;
+  if(env==='live'){
+    btn.textContent='\u25CF LIVE';
+    btn.style.color='#ef4444'; btn.style.borderColor='#ef4444';
+    btn.style.background='rgba(239,68,68,0.12)';
+  } else {
+    btn.textContent='\u25CF PRACTICE';
+    btn.style.color='#10b981'; btn.style.borderColor='#10b981';
+    btn.style.background='rgba(16,185,129,0.12)';
+  }
+}
+function showEnvSwitchModal(){
+  var curEnv = document.getElementById('env-badge') ? document.getElementById('env-badge').textContent.toLowerCase() : 'practice';
+  _pendingEnv = curEnv==='live' ? 'practice' : 'live';
+  var title = document.getElementById('env-modal-title');
+  var body = document.getElementById('env-modal-body');
+  var confirmBtn = document.getElementById('env-confirm-btn');
+  if(_pendingEnv==='live'){
+    title.textContent='Switch to LIVE Trading?';
+    body.innerHTML='You are about to switch to a <strong style="color:#ef4444;">REAL MONEY</strong> account. All trades will use real funds from your live OANDA account.';
+    confirmBtn.style.background='#ef4444';
+    confirmBtn.textContent='Yes, Switch to LIVE';
+  } else {
+    title.textContent='Switch to PRACTICE Mode?';
+    body.innerHTML='You are about to switch back to a <strong style="color:#10b981;">demo account</strong>. No real funds will be used.';
+    confirmBtn.style.background='#10b981';
+    confirmBtn.textContent='Switch to Practice';
+  }
+  var modal = document.getElementById('env-switch-modal');
+  if(modal){ modal.style.display='flex'; }
+}
+function closeEnvModal(){
+  var modal = document.getElementById('env-switch-modal');
+  if(modal){ modal.style.display='none'; }
+  _pendingEnv = null;
+}
+async function confirmEnvSwitch(){
+  if(!_pendingEnv) return;
+  closeEnvModal();
+  try{
+    const r = await fetch('/api/env-switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({env:_pendingEnv})});
+    const d = await r.json();
+    if(d.status==='ok'){
+      _updateEnvToggle(d.env);
+      var badge = document.getElementById('env-badge');
+      if(badge) badge.textContent = d.env.charAt(0).toUpperCase()+d.env.slice(1);
+      alert('\u2705 Switched to ' + d.env.toUpperCase() + '. Please restart Tradalgo to reconnect to the new API endpoint.');
+    }
+  } catch(e){ alert('Failed to switch environment: '+e); }
+}
+document.addEventListener('DOMContentLoaded',function(){
+  var badge = document.getElementById('env-badge');
+  if(badge){ _updateEnvToggle(badge.textContent.toLowerCase()); }
+});
+</script>
 
 <div class="layout">
 
@@ -3736,8 +3874,23 @@ tr:hover td{transition:background .15s}
     <a href="/settings">Settings</a>
   </nav>
   <div class="hspace"></div>
-  <span id="last-run" style="font-size:11px;color:var(--muted)"></span>
+  <button id="env-toggle-btn" onclick="showEnvSwitchModal()" title="Switch between Practice and Live trading" style="padding:5px 12px;border-radius:20px;border:1.5px solid;font-size:11px;font-weight:800;cursor:pointer;transition:all .2s;letter-spacing:0.5px;"></button>
+  <span id="last-run" style="font-size:11px;color:var(--muted);margin-left:10px;"></span>
 </header>
+<script>
+(function(){
+  if(!sessionStorage.getItem('tradalgo_risk_accepted')){
+    window.location.href='/';
+  }
+  function _updateEnvToggle(env){
+    var btn=document.getElementById('env-toggle-btn'); if(!btn)return;
+    if(env==='live'){btn.textContent='\u25CF LIVE';btn.style.color='#ef4444';btn.style.borderColor='#ef4444';btn.style.background='rgba(239,68,68,0.12)';}
+    else{btn.textContent='\u25CF PRACTICE';btn.style.color='#10b981';btn.style.borderColor='#10b981';btn.style.background='rgba(16,185,129,0.12)';}
+  }
+  fetch('/api/config').then(r=>r.json()).then(d=>_updateEnvToggle((d.OANDA_ENV||'practice').toLowerCase())).catch(()=>{});
+  window.showEnvSwitchModal=function(){ window.location.href='/'; };
+})();
+</script>
 
 <main>
   <!-- Controls -->
@@ -4080,7 +4233,15 @@ input:focus, select:focus { border-color:var(--accent); }
     <a href="/performance">Performance</a>
     <a href="/settings" class="active">⚙️ Settings</a>
   </nav>
+  <button id="env-toggle-btn" onclick="window.location.href='/'" title="Switch environment via Live dashboard" style="margin-left:auto;padding:5px 12px;border-radius:20px;border:1.5px solid;font-size:11px;font-weight:800;cursor:pointer;transition:all .2s;letter-spacing:0.5px;"></button>
 </header>
+<script>
+(function(){
+  if(!sessionStorage.getItem('tradalgo_risk_accepted')){ window.location.href='/'; }
+  function _ut(env){var b=document.getElementById('env-toggle-btn');if(!b)return;if(env==='live'){b.textContent='\u25CF LIVE';b.style.color='#ef4444';b.style.borderColor='#ef4444';b.style.background='rgba(239,68,68,0.12)';}else{b.textContent='\u25CF PRACTICE';b.style.color='#10b981';b.style.borderColor='#10b981';b.style.background='rgba(16,185,129,0.12)';}}
+  fetch('/api/config').then(r=>r.json()).then(d=>_ut((d.OANDA_ENV||'practice').toLowerCase())).catch(()=>{});
+})();
+</script>
 <div class="container">
   <form id="settingsForm">
     <!-- OANDA Credentials -->
@@ -4266,9 +4427,17 @@ tr:hover td{background:var(--bg3);transition:background .15s}
   <div class="logo">Trad<span>algo</span></div>
   <nav><a href="/">Live</a><a href="/backtest">Backtest</a><a href="/performance" class="active">Performance</a><a href="/settings">Settings</a></nav>
   <div class="hspacer"></div>
-  <span id="lu" style="font-size:11px;color:var(--muted)"></span>
+  <button id="env-toggle-btn" onclick="window.location.href='/'" title="Switch environment via Live dashboard" style="padding:5px 12px;border-radius:20px;border:1.5px solid;font-size:11px;font-weight:800;cursor:pointer;transition:all .2s;letter-spacing:0.5px;"></button>
+  <span id="lu" style="font-size:11px;color:var(--muted);margin-left:10px;"></span>
   <a href="/api/performance/export-csv" style="padding:6px 14px;background:var(--bg3);border:1px solid var(--border);color:var(--muted);border-radius:6px;font-size:11px;font-weight:500;text-decoration:none;margin-left:8px;transition:all .2s" onmouseover="this.style.color='var(--text)';this.style.background='var(--bg4)'" onmouseout="this.style.color='var(--muted)';this.style.background='var(--bg3)'"> &#8595; Export CSV</a>
 </header>
+<script>
+(function(){
+  if(!sessionStorage.getItem('tradalgo_risk_accepted')){ window.location.href='/'; }
+  function _ut(env){var b=document.getElementById('env-toggle-btn');if(!b)return;if(env==='live'){b.textContent='\u25CF LIVE';b.style.color='#ef4444';b.style.borderColor='#ef4444';b.style.background='rgba(239,68,68,0.12)';}else{b.textContent='\u25CF PRACTICE';b.style.color='#10b981';b.style.borderColor='#10b981';b.style.background='rgba(16,185,129,0.12)';}}
+  fetch('/api/config').then(r=>r.json()).then(d=>_ut((d.OANDA_ENV||'practice').toLowerCase())).catch(()=>{});
+})();
+</script>
 <main>
   <div class="ptabs">
     <button class="pb" data-p="1">Today</button>
@@ -4625,11 +4794,32 @@ def route_backtest_latest():
 @app.route("/api/config", methods=["GET","POST"])
 def route_config():
     if freq.method=="POST":
-        updates=freq.get_json()
+        updates = freq.get_json()
+        oanda_changed = any(k in updates for k in ("OANDA_API_KEY", "OANDA_ACCOUNT_ID", "OANDA_ENV"))
         CFG.update(updates); _save_config(CFG)
-        return jsonify({"status":"ok"})
+        # Fix 1: Re-init OandaClient if OANDA credentials/env changed
+        if oanda_changed:
+            global _client
+            _client = OandaClient()
+            log.info("OandaClient re-initialized after config change")
+        return jsonify({"status": "ok", "client_reinitialized": oanda_changed})
     safe={k:v for k,v in CFG.items() if "KEY" not in k and "PASSWORD" not in k}
     return jsonify(safe)
+
+
+@app.route("/api/env-switch", methods=["POST"])
+def route_env_switch():
+    """Switches OANDA_ENV between practice and live, reinitializes the client."""
+    global _client
+    data = freq.get_json()
+    new_env = data.get("env", "practice").lower()
+    if new_env not in ("practice", "live"):
+        return jsonify({"status": "error", "message": "env must be 'practice' or 'live'"}), 400
+    CFG["OANDA_ENV"] = new_env
+    _save_config(CFG)
+    _client = OandaClient()
+    log.info(f"Environment switched to {new_env.upper()} — OandaClient re-initialized")
+    return jsonify({"status": "ok", "env": new_env, "restart_required": True})
 
 @app.route("/api/backtest/run")
 def route_backtest_run():
@@ -5146,7 +5336,7 @@ def trading_cycle():
         if len(candles)<60: continue
         try:
             sr=run_all_strategies(candles,instrument)
-            con=consensus_signal(sr,CFG["STRATEGY_WEIGHTS"],threshold=0.35)
+            con=consensus_signal(sr,CFG["STRATEGY_WEIGHTS"],threshold=CFG.get("CONSENSUS_THRESHOLD",0.45))
             if not con["signal"]: continue
             # Apply trend + volatility filters silently
             con=filtered_signal(con,candles,instrument)

@@ -29,6 +29,48 @@
     <script src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
+
+    <!-- ═══ RISK DISCLAIMER MODAL (once per session) ═══ -->
+    <div id="site-risk-overlay" style="position:fixed;inset:0;background:rgba(5,11,20,0.95);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);">
+      <div style="background:#0f172a;border:1px solid rgba(0,242,254,0.2);border-radius:20px;max-width:540px;width:92%;padding:40px;box-shadow:0 30px 80px rgba(0,0,0,0.8);">
+        <div style="text-align:center;margin-bottom:24px;">
+          <div style="width:64px;height:64px;background:rgba(245,158,11,0.15);border:2px solid #f59e0b;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:1.8rem;">&#9888;</div>
+          <h2 style="font-size:1.4rem;font-weight:800;color:#fff;margin-bottom:10px;font-family:'Outfit',sans-serif;">Risk Disclosure</h2>
+          <p style="color:#94A3B8;font-size:0.9rem;line-height:1.7;">Automated forex and algorithmic trading involves <strong style="color:#ef4444;">significant financial risk</strong>. You may lose some or all of your invested capital. Tradalgo is a software tool only and does not constitute financial advice. Past performance does not guarantee future results.</p>
+        </div>
+        <div style="background:#0b0f19;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px;margin-bottom:24px;font-size:0.82rem;color:#64748B;line-height:1.8;">
+          &#8226; Forex and CFD trading carries a high level of risk to your capital<br>
+          &#8226; Leverage amplifies both gains <em>and</em> losses<br>
+          &#8226; This software does not guarantee profitable trades<br>
+          &#8226; Only invest what you can afford to lose in its entirety<br>
+          &#8226; You are solely responsible for all trading decisions
+        </div>
+        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;margin-bottom:22px;color:#cbd5e1;font-size:0.87rem;line-height:1.5;">
+          <input type="checkbox" id="site-risk-cb" style="width:18px;height:18px;min-width:18px;margin-top:1px;accent-color:#00f2fe;cursor:pointer;">
+          I have read and understood the risk disclosure. I accept that automated trading involves significant financial risk and I take full responsibility for my own trading decisions.
+        </label>
+        <button id="site-risk-btn" onclick="acceptSiteRisk()" disabled style="width:100%;padding:16px;background:linear-gradient(135deg,#00f2fe,#00a8ff);color:#050b14;border:none;border-radius:10px;font-weight:800;font-size:15px;cursor:not-allowed;opacity:0.45;transition:all .25s;font-family:'Outfit',sans-serif;">I Accept — Enter Tradalgo.store</button>
+      </div>
+    </div>
+    <script>
+    (function(){
+      if(sessionStorage.getItem('tradalgo_site_risk')){
+        document.getElementById('site-risk-overlay').style.display='none';
+      }
+      var cb=document.getElementById('site-risk-cb');
+      var btn=document.getElementById('site-risk-btn');
+      cb.addEventListener('change',function(){
+        btn.disabled=!cb.checked;
+        btn.style.opacity=cb.checked?'1':'0.45';
+        btn.style.cursor=cb.checked?'pointer':'not-allowed';
+      });
+    })();
+    function acceptSiteRisk(){
+      sessionStorage.setItem('tradalgo_site_risk','1');
+      document.getElementById('site-risk-overlay').style.display='none';
+    }
+    </script>
+
     <!-- Top Announcement Bar -->
     <div class="announcement-bar" id="announcementBar">
         <div class="announcement-content">
@@ -710,5 +752,11 @@
 
     <!-- Custom App JS -->
     <script src="app.js"></script>
+
+    <!-- ═══ STICKY RISK DISCLAIMER BAR ═══ -->
+    <div id="disclaimer-bar" style="position:fixed;bottom:0;left:0;right:0;z-index:9999;background:rgba(5,11,20,0.95);border-top:1px solid rgba(245,158,11,0.3);backdrop-filter:blur(8px);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <p style="margin:0;font-size:0.75rem;color:#94A3B8;line-height:1.5;"><span style="color:#f59e0b;font-weight:700;">&#9888; Risk Warning:</span> Trading involves significant risk of loss and may not be suitable for all investors. Tradalgo is a software tool, not financial advice. Past performance is not indicative of future results. Capital at risk.</p>
+      <button onclick="document.getElementById('disclaimer-bar').style.display='none'" style="background:transparent;border:1px solid rgba(255,255,255,0.15);color:#64748B;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0;">Dismiss</button>
+    </div>
 </body>
 </html>

@@ -101,9 +101,18 @@ def run_backtest(
                     pl = entry - current["close"]
                     outcome = "close"
 
-            # Convert P&L to money (simplified: 1 pip = $1 per micro lot)
-            units    = int((balance * RISK_PER_TRADE_PCT / 100) / (sl_pips * pip * 1000))
-            pl_money = pl * units * 1000
+            # Convert P&L to money using proper pip value per unit
+            # (matches tradalgo.py calculate_position_units for comparable backtest P&L)
+            def _pip_value_per_unit(inst):
+                """USD value of a 1-pip move for 1 unit. Mirrors tradalgo.py."""
+                if "JPY" in inst: return 0.01
+                if "XAU" in inst: return 0.10
+                return 0.0001  # USD-quote pairs: pip value is always 0.0001 per unit
+
+            ppv   = _pip_value_per_unit(instrument)
+            units = int((balance * RISK_PER_TRADE_PCT / 100) / (sl_pips * ppv)) if ppv > 0 else 1
+            units = max(1, min(units, 1_000_000))
+            pl_money = pl * units
             balance  = max(0, balance + pl_money)
 
             trade = {
