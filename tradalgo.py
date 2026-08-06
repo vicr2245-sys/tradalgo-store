@@ -2546,7 +2546,12 @@ async function confirmEnvSwitch(){
       if(badge) badge.textContent = d.env.charAt(0).toUpperCase()+d.env.slice(1);
       alert('\u2705 Switched to ' + d.env.toUpperCase() + '. Please restart Tradalgo to reconnect to the new API endpoint.');
     }
+  } catch(e){ alert('Failed to switch environment: '+e); }
 }
+document.addEventListener('DOMContentLoaded',function(){
+  var badge = document.getElementById('env-badge');
+  if(badge){ _updateEnvToggle(badge.textContent.toLowerCase()); }
+});
 </script>
 <div id="oanda-warning-banner" style="display:none;margin:12px 16px 0 16px;background:rgba(239,68,68,0.15);border:1px solid #ef4444;border-radius:8px;padding:12px 16px;color:#f8fafc;font-size:12px;align-items:center;justify-content:space-between;z-index:10;">
   <div style="display:flex;align-items:center;gap:10px;">
