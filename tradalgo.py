@@ -2677,7 +2677,8 @@ document.addEventListener('DOMContentLoaded',function(){
           <div id="rg-bar" style="height:100%;width:0%;background:var(--green);
             border-radius:3px;transition:width .6s var(--ease),background .4s var(--ease)"></div>
         </div>
-        <div id="rg-status" style="font-size:10px;color:var(--muted);margin-top:4px"></div>
+        <div id="rg-status" style="font-size:10px;color:var(--muted);margin-top:4px;margin-bottom:8px"></div>
+        <button id="reset-baseline-btn" class="btn" style="width:100%;padding:6px 0;font-size:12px;background:rgba(255,255,255,0.05);color:var(--text);border:1px solid var(--border);" onclick="resetDrawdownBaseline()">Reset Baseline</button>
       </div>
     </div>
 
@@ -3142,6 +3143,26 @@ function togglePause() {
     var b = document.getElementById('pause-btn');
     if (b) b.style.opacity = '1';
   });
+}
+
+function resetDrawdownBaseline() {
+  if (!confirm("Are you sure you want to reset your starting balance baseline?\n\nThis will reset your drawdown calculation to 0% from your current balance, effectively bypassing the safety limit and allowing trading to safely resume.")) {
+    return;
+  }
+  var btn = document.getElementById('reset-baseline-btn');
+  if (btn) btn.style.opacity = '0.5';
+  fetch('/api/reset-drawdown', {method:'POST', headers:{'X-Tradalgo-Token': API_TOKEN}})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if (d.success) {
+      refreshStatus(); // Immediately refresh stats
+      refreshFeed(); // Show feed update
+    } else {
+      alert("Failed to reset baseline: " + (d.error || "Unknown error"));
+    }
+  })
+  .catch(function(e){ alert("Error resetting baseline: " + e); })
+  .finally(function(){ if (btn) btn.style.opacity = '1'; });
 }
 
 function updatePauseBtn(running) {
@@ -4967,6 +4988,25 @@ def route_pause():
     else:
         feed_push("info", {"title": "Trading paused", "body": "You have paused the bot. No new trades will be opened until you resume."})
     return jsonify({"live_trading": state})
+
+
+@app.route("/api/reset-drawdown", methods=["POST"])
+def route_reset_drawdown():
+    """Resets the starting balance to the current broker balance to reset drawdown to 0%."""
+    try:
+        cur_bal = _client.get_balance() if _client else None
+        if cur_bal is not None:
+            _perf["starting_balance"] = round(float(cur_bal), 2)
+            _perf["start_date"] = _utc_now().strftime("%Y-%m-%d")
+            _perf_save()
+            log.info(f"Drawdown baseline manually reset to ${cur_bal:,.2f}")
+            feed_push("info", {"title": "Baseline Reset", "body": f"Safety limit baseline has been reset to your current balance (${cur_bal:,.2f}). Drawdown is now 0%."})
+            return jsonify({"success": True, "new_baseline": _perf["starting_balance"]})
+        else:
+            return jsonify({"success": False, "error": "Could not fetch current balance from broker."}), 500
+    except Exception as e:
+        log.error(f"Error resetting drawdown baseline: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/status")
