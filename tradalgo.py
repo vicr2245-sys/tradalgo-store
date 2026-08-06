@@ -1237,7 +1237,12 @@ class OandaClient:
         })
 
     def _base(self): return _oanda_api_url()
-    def _aid(self):  return str(CFG.get("OANDA_ACCOUNT_ID", "")).strip().strip("\"'").strip()
+    def _aid(self):
+        aid = str(CFG.get("OANDA_ACCOUNT_ID", "")).strip().strip("\"'").strip()
+        digits = "".join(c for c in aid if c.isdigit())
+        if len(digits) in (16, 17) and "-" not in aid:
+            return f"{digits[:3]}-{digits[3:6]}-{digits[6:-3]}-{digits[-3:]}"
+        return aid
 
     def _get(self, path, params=None):
         r = self.session.get(f"{self._base()}{path}", params=params, timeout=10)
