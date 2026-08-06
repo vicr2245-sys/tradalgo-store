@@ -77,24 +77,40 @@ def run_backtest(
             if signal == "BUY":
                 sl_price = entry - sl_pips * pip
                 tp_price = entry + tp_pips * pip
-                # simulate: did candle hit TP or SL first?
-                if current["low"] <= sl_price:
+                hit_sl = current["low"] <= sl_price
+                hit_tp = current["high"] >= tp_price
+                if hit_sl and hit_tp:
+                    if abs(entry - tp_price) < abs(entry - sl_price):
+                        pl = tp_pips * pip
+                        outcome = "TP"
+                    else:
+                        pl = -sl_pips * pip
+                        outcome = "SL"
+                elif hit_sl:
                     pl = -sl_pips * pip
                     outcome = "SL"
-                elif current["high"] >= tp_price:
+                elif hit_tp:
                     pl = tp_pips * pip
                     outcome = "TP"
                 else:
-                    # held open; close at candle close
                     pl = current["close"] - entry
                     outcome = "close"
             else:  # SELL
                 sl_price = entry + sl_pips * pip
                 tp_price = entry - tp_pips * pip
-                if current["high"] >= sl_price:
+                hit_sl = current["high"] >= sl_price
+                hit_tp = current["low"] <= tp_price
+                if hit_sl and hit_tp:
+                    if abs(entry - tp_price) < abs(entry - sl_price):
+                        pl = tp_pips * pip
+                        outcome = "TP"
+                    else:
+                        pl = -sl_pips * pip
+                        outcome = "SL"
+                elif hit_sl:
                     pl = -sl_pips * pip
                     outcome = "SL"
-                elif current["low"] <= tp_price:
+                elif hit_tp:
                     pl = tp_pips * pip
                     outcome = "TP"
                 else:
@@ -103,16 +119,21 @@ def run_backtest(
 
             # Convert P&L to money using proper pip value per unit
             # (matches tradalgo.py calculate_position_units for comparable backtest P&L)
-            def _pip_value_per_unit(inst):
-                """USD value of a 1-pip move for 1 unit. Mirrors tradalgo.py."""
-                if "JPY" in inst: return 0.01
-                if "XAU" in inst: return 0.10
-                return 0.0001  # USD-quote pairs: pip value is always 0.0001 per unit
+            def _pip_value_usd_per_unit(inst, mid_px):
+                pip_size = 0.01 if "JPY" in inst else (0.10 if "XAU" in inst else 0.0001)
+                if "JPY" in inst:
+                    rate = mid_px if (mid_px and mid_px > 0) else 155.0
+                    return pip_size / rate
+                elif "XAU" in inst:
+                    return 0.10
+                else:
+                    return 0.0001
 
-            ppv   = _pip_value_per_unit(instrument)
-            units = int((balance * RISK_PER_TRADE_PCT / 100) / (sl_pips * ppv)) if ppv > 0 else 1
+            ppv   = _pip_value_usd_per_unit(instrument, entry)
+            units = int((balance * RISK_PER_TRADE_PCT / 100) / (sl_pips * ppv)) if (ppv > 0 and sl_pips > 0) else 1
             units = max(1, min(units, 1_000_000))
-            pl_money = pl * units
+            pl_pips = pl / pip if pip > 0 else 0.0
+            pl_money = pl_pips * ppv * units
             balance  = max(0, balance + pl_money)
 
             trade = {
@@ -123,7 +144,7 @@ def run_backtest(
                 "sl":         round(sl_price, 5),
                 "tp":         round(tp_price, 5),
                 "outcome":    outcome,
-                "pl_pips":    round(pl / pip, 1),
+                "pl_pips":    round(pl_pips, 1),
                 "pl_money":   round(pl_money, 2),
                 "balance":    round(balance, 2),
                 "strategies": [r for r in consensus["reasons"]],
@@ -158,17 +179,17 @@ def _summarise(instrument: str, trades: list, equity_curve: list, initial: float
     losses = [t for t in trades if t["pl_pips"] <= 0]
     net_pl = sum(t["pl_money"] for t in trades)
 
-    pls        = [t["pl_pips"] for t in trades]
-    avg_win    = sum(t["pl_pips"] for t in wins)   / len(wins)   if wins   else 0
-    avg_loss   = sum(t["pl_pips"] for t in losses) / len(losses) if losses else 0
-    profit_factor = (abs(avg_win * len(wins)) / abs(avg_loss * len(losses))) if losses else float("inf")
+    avg_win    = sum(t["pl_pips"] for t in wins)   / len(wins)   if wins   else 0.0
+    avg_loss   = sum(t["pl_pips"] for t in losses) / len(losses) if losses else 0.0
+    loss_val   = abs(avg_loss * len(losses))
+    profit_factor = (abs(avg_win * len(wins)) / loss_val) if loss_val > 0 else (999.0 if wins else 0.0)
 
     # max drawdown on equity curve
-    peak = equity_curve[0]
+    peak = equity_curve[0] if equity_curve else initial
     max_dd = 0.0
     for v in equity_curve:
         if v > peak: peak = v
-        dd = (peak - v) / peak
+        dd = ((peak - v) / peak) if peak > 0 else 0.0
         if dd > max_dd: max_dd = dd
 
     return {
@@ -176,14 +197,14 @@ def _summarise(instrument: str, trades: list, equity_curve: list, initial: float
         "trades":         len(trades),
         "wins":           len(wins),
         "losses":         len(losses),
-        "win_rate":       round(len(wins) / len(trades) * 100, 1),
+        "win_rate":       round(len(wins) / len(trades) * 100, 1) if trades else 0.0,
         "net_pl":         round(net_pl, 2),
-        "net_pl_pct":     round((net_pl / initial) * 100, 2),
+        "net_pl_pct":     round((net_pl / initial) * 100, 2) if initial > 0 else 0.0,
         "avg_win_pips":   round(avg_win,  1),
         "avg_loss_pips":  round(avg_loss, 1),
         "profit_factor":  round(profit_factor, 2),
         "max_drawdown":   round(max_dd * 100, 2),
-        "final_balance":  round(equity_curve[-1], 2),
+        "final_balance":  round(equity_curve[-1], 2) if equity_curve else initial,
     }
 
 

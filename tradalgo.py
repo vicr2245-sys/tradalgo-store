@@ -73,14 +73,14 @@ def _atomic_write_json(path: Path, data) -> None:
     """
     tmp_path = path.with_name(f"{path.name}.tmp{os.getpid()}")
     try:
-        tmp_path.write_text(json.dumps(data, indent=2))
+        tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         os.replace(tmp_path, path)
     finally:
-        # Clean up the temp file if something went wrong before the replace
-        # (e.g. json.dumps raised on non-serializable data).
         if tmp_path.exists():
             try: tmp_path.unlink()
             except Exception: pass
+
+_cfg_lock = threading.Lock()
 
 _DEFAULT_CONFIG = {
     "OANDA_ACCOUNT_ID": "",
@@ -135,10 +135,6 @@ _DEFAULT_CONFIG = {
 }
 
 # ── Secrets ───────────────────────────────────────────────────────────────
-# These keys hold credentials. If the matching environment variable is set,
-# it always wins over whatever is in tradalgo_config.json, and it is never
-# written back to disk — so once you switch to env vars, the JSON file on
-# disk simply never touches your real keys again.
 _SECRET_ENV_VARS = {
     "OANDA_ACCOUNT_ID": "TRADALGO_OANDA_ACCOUNT_ID",
     "OANDA_API_KEY":    "TRADALGO_OANDA_API_KEY",
@@ -147,14 +143,13 @@ _SECRET_ENV_VARS = {
     "EMAIL_RECIPIENT":  "TRADALGO_EMAIL_RECIPIENT",
     "AI_BIAS_API_KEY":  "TRADALGO_AI_BIAS_API_KEY",
 }
-_env_sourced_keys: set = set()  # populated by _apply_env_overrides at load time
+_env_sourced_keys: set = set()
 
 def _apply_env_overrides(cfg: dict) -> dict:
     global _env_sourced_keys
     _env_sourced_keys = set()
     for cfg_key, env_name in _SECRET_ENV_VARS.items():
         val = os.environ.get(env_name)
-        # Only fallback to env var if config file does not contain a value
         if val and not cfg.get(cfg_key):
             cfg[cfg_key] = val
             _env_sourced_keys.add(cfg_key)
@@ -166,28 +161,30 @@ def _apply_env_overrides(cfg: dict) -> dict:
 def _load_config() -> dict:
     if CONFIG_FILE.exists():
         try:
-            saved = json.loads(CONFIG_FILE.read_text())
-            # Merge saved over defaults so new keys always appear
+            saved = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             cfg = {**_DEFAULT_CONFIG, **saved}
             return _apply_env_overrides(cfg)
-        except Exception:
-            pass
+        except Exception as e:
+            log.error(f"Failed to parse {CONFIG_FILE}: {e}")
+            try:
+                bak = CONFIG_FILE.with_name(f"{CONFIG_FILE.name}.bak")
+                CONFIG_FILE.rename(bak)
+                log.warning(f"Backed up corrupted config to {bak}")
+            except Exception: pass
     return _apply_env_overrides(dict(_DEFAULT_CONFIG))
 
 def _save_config(cfg: dict):
-    # Always write the full merged config — new default keys are never lost.
-    # Secrets that came from an environment variable are never written to
-    # disk; the file keeps whatever placeholder was already there (usually
-    # empty) so the real value only ever lives in the environment.
-    full = {**_DEFAULT_CONFIG, **cfg}
-    if _env_sourced_keys:
-        try:
-            on_disk = json.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
-        except Exception:
-            on_disk = {}
-        for key in _env_sourced_keys:
-            full[key] = on_disk.get(key, "")
-    _atomic_write_json(CONFIG_FILE, full)
+    with _cfg_lock:
+        full = {**_DEFAULT_CONFIG, **cfg}
+        if _env_sourced_keys:
+            try:
+                on_disk = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
+            except Exception:
+                on_disk = {}
+            for key in _env_sourced_keys:
+                full[key] = on_disk.get(key, "")
+        _atomic_write_json(CONFIG_FILE, full)
+        CFG.update(full)
 
 CFG = _load_config()
 
@@ -260,9 +257,19 @@ def _lows(candles):    return np.array([c["low"]   for c in candles], dtype=floa
 def _ema(series, period):
     result = np.full_like(series, np.nan)
     k = 2 / (period + 1)
-    result[period - 1] = series[:period].mean()
-    for i in range(period, len(series)):
-        result[i] = series[i] * k + result[i-1] * (1-k)
+    valid_mask = ~np.isnan(series)
+    if not np.any(valid_mask):
+        return result
+    first_valid = int(np.argmax(valid_mask))
+    seed_end = first_valid + period
+    if seed_end > len(series):
+        return result
+    result[seed_end - 1] = np.mean(series[first_valid:seed_end])
+    for i in range(seed_end, len(series)):
+        if np.isnan(series[i]):
+            result[i] = result[i - 1]
+        else:
+            result[i] = series[i] * k + result[i - 1] * (1 - k)
     return result
 
 def _sma(series, period):
@@ -1323,9 +1330,13 @@ class OandaClient:
 
     def place_market_order(self, instrument, units, stop_loss_price=None,
                            take_profit_price=None, client_comment=""):
+        def _fmt(p, inst):
+            if "JPY" in inst: return f"{p:.3f}"
+            if "XAU" in inst: return f"{p:.2f}"
+            return f"{p:.5f}"
         order={"type":"MARKET","instrument":instrument,"units":str(units)}
-        if stop_loss_price:   order["stopLossOnFill"]  ={"price":f"{stop_loss_price:.5f}"}
-        if take_profit_price: order["takeProfitOnFill"]={"price":f"{take_profit_price:.5f}"}
+        if stop_loss_price:   order["stopLossOnFill"]  ={"price":_fmt(stop_loss_price, instrument)}
+        if take_profit_price: order["takeProfitOnFill"]={"price":_fmt(take_profit_price, instrument)}
         if client_comment:    order["clientExtensions"]={"comment":client_comment[:128]}
         return self._post(f"/v3/accounts/{self._aid()}/orders",{"order":order})
 
@@ -4327,7 +4338,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const cfg = await res.json();
     for (const [k, v] of Object.entries(cfg)) {
       const el = document.getElementById(k);
-      if (el) el.value = v;
+      if (el) el.value = (v === null || v === undefined) ? '' : v;
     }
   } catch (err) {
     console.error('Failed to load config:', err);
@@ -4340,8 +4351,8 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
   const payload = {};
   fields.forEach(f => {
     const el = document.getElementById(f);
-    if (el && el.value !== '') {
-      payload[f] = el.type === 'number' ? parseFloat(el.value) : el.value;
+    if (el) {
+      payload[f] = el.type === 'number' ? (parseFloat(el.value) || 0) : el.value;
     }
   });
 
@@ -4794,31 +4805,44 @@ def route_backtest_latest():
 @app.route("/api/config", methods=["GET","POST"])
 def route_config():
     if freq.method=="POST":
-        updates = freq.get_json()
+        updates = freq.get_json() or {}
         oanda_changed = any(k in updates for k in ("OANDA_API_KEY", "OANDA_ACCOUNT_ID", "OANDA_ENV"))
-        CFG.update(updates); _save_config(CFG)
-        # Fix 1: Re-init OandaClient if OANDA credentials/env changed
-        if oanda_changed:
-            global _client
-            _client = OandaClient()
-            log.info("OandaClient re-initialized after config change")
+        with _cfg_lock:
+            CFG.update(updates)
+            _save_config(CFG)
+            if oanda_changed:
+                global _client
+                _client = OandaClient()
+                log.info("OandaClient re-initialized after config change")
         return jsonify({"status": "ok", "client_reinitialized": oanda_changed})
-    safe={k:v for k,v in CFG.items() if "KEY" not in k and "PASSWORD" not in k}
-    return jsonify(safe)
+    with _cfg_lock:
+        return jsonify(dict(CFG))
 
 
 @app.route("/api/env-switch", methods=["POST"])
 def route_env_switch():
     """Switches OANDA_ENV between practice and live, reinitializes the client."""
     global _client
-    data = freq.get_json()
+    data = freq.get_json() or {}
     new_env = data.get("env", "practice").lower()
     if new_env not in ("practice", "live"):
         return jsonify({"status": "error", "message": "env must be 'practice' or 'live'"}), 400
-    CFG["OANDA_ENV"] = new_env
-    _save_config(CFG)
-    _client = OandaClient()
-    log.info(f"Environment switched to {new_env.upper()} — OandaClient re-initialized")
+
+    with _cfg_lock:
+        CFG["OANDA_ENV"] = new_env
+        _save_config(CFG)
+        _client = OandaClient()
+
+    with _ledger_lock:
+        _ledger.clear()
+        _ledger_save()
+
+    with _perf_lock:
+        _perf["trades"] = []
+        _perf["starting_balance"] = 0.0
+        _perf_save()
+
+    log.info(f"Environment switched to {new_env.upper()} — OandaClient re-initialized, ledger & perf reset")
     return jsonify({"status": "ok", "env": new_env, "restart_required": True})
 
 @app.route("/api/backtest/run")
@@ -5355,6 +5379,7 @@ def trading_cycle():
                 continue
             sl_pips=con["sl_pips"]; tp_pips=con["tp_pips"]
             units=_client.calculate_units(instrument,sl_pips,CFG["RISK_PER_TRADE_PCT"],balance,prices_hint=all_prices)
+            if not units: continue
             if con["signal"]=="SELL": units=-units
             pd=all_prices.get(instrument,{}); ep=pd.get("ask" if con["signal"]=="BUY" else "bid",0)
             if not ep: continue
@@ -5474,6 +5499,38 @@ def run_bot():
 # ══════════════════════════════════════════════════════════════════════════════
 # ── SECTION 13: SETUP WIZARD (GUI) ───────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _create_desktop_shortcut():
+    if os.name != 'nt': return
+    vbs_path = None
+    try:
+        import subprocess, sys
+        user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
+        desktop = os.path.join(user_profile, 'Desktop')
+        if not os.path.exists(desktop): return
+        path = os.path.join(desktop, 'Tradalgo.lnk').replace('"', '""')
+        target = (sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)).replace('"', '""')
+        work_dir = os.path.dirname(target).replace('"', '""')
+        
+        vbs_script = f"""
+Set ws = CreateObject("WScript.Shell")
+Set link = ws.CreateShortcut("{path}")
+link.TargetPath = "{target}"
+link.WorkingDirectory = "{work_dir}"
+link.Save
+"""
+        vbs_path = os.path.join(os.environ.get('TEMP', work_dir), 'create_tradalgo_shortcut.vbs')
+        with open(vbs_path, 'w', encoding='utf-8') as f:
+            f.write(vbs_script)
+        
+        subprocess.run(['cscript', '//nologo', vbs_path], creationflags=0x08000000, timeout=10)
+    except Exception as e:
+        log.debug(f"Failed to create desktop shortcut: {e}")
+    finally:
+        if vbs_path and os.path.exists(vbs_path):
+            try: os.remove(vbs_path)
+            except Exception: pass
+
 
 def run_setup(on_complete=None):
     """
@@ -5662,6 +5719,9 @@ def run_setup(on_complete=None):
 
         # Write to disk
         _save_config(cfg)
+        
+        # Automatically create desktop shortcut on first setup
+        _create_desktop_shortcut()
 
         # Update the live module-level CFG dict so bot/dashboard pick it up
         # immediately without needing a restart
@@ -5857,9 +5917,10 @@ def run_email_test():
     print("\n" + "═"*52)
     print("  Tradalgo — Email Diagnostic")
     print("═"*52 + "\n")
-    if not CFG["EMAIL_SENDER"] or "your" in CFG["EMAIL_SENDER"].lower():
+    sender_str = str(CFG.get("EMAIL_SENDER") or "").strip()
+    if not sender_str or "your" in sender_str.lower():
         print("  ❌ EMAIL_SENDER not configured. Run --setup first.\n"); return
-    print(f"  Sender    : {CFG['EMAIL_SENDER']}")
+    print(f"  Sender    : {sender_str}")
     print(f"  Recipient : {CFG['EMAIL_RECIPIENT']}")
     print(f"  SMTP      : {CFG['SMTP_HOST']}:{CFG['SMTP_PORT']}\n")
     print("  Testing SMTP connection…")
@@ -5982,17 +6043,7 @@ def main():
     bot_thread = threading.Thread(target=run_bot, daemon=True)
     bot_thread.start()
 
-    # Open browser after a short delay then start Flask on main thread
-    def _open_browser():
-        time.sleep(2)
-        try:
-            import webbrowser
-            webbrowser.open(f"http://localhost:{port}")
-        except Exception:
-            pass
-    threading.Thread(target=_open_browser, daemon=True).start()
-
-    # Flask blocks here on the main thread — keeps process alive
+    # Flask / PyWebView blocks here on the main thread — keeps process alive
     start_dashboard()
 
 if __name__ == "__main__":

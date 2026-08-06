@@ -19,10 +19,19 @@ def lows(candles: list) -> np.ndarray:
 def ema(series: np.ndarray, period: int) -> np.ndarray:
     result = np.full_like(series, np.nan)
     k = 2 / (period + 1)
-    # seed with SMA
-    result[period - 1] = series[:period].mean()
-    for i in range(period, len(series)):
-        result[i] = series[i] * k + result[i - 1] * (1 - k)
+    valid_mask = ~np.isnan(series)
+    if not np.any(valid_mask):
+        return result
+    first_valid = int(np.argmax(valid_mask))
+    seed_end = first_valid + period
+    if seed_end > len(series):
+        return result
+    result[seed_end - 1] = np.mean(series[first_valid:seed_end])
+    for i in range(seed_end, len(series)):
+        if np.isnan(series[i]):
+            result[i] = result[i - 1]
+        else:
+            result[i] = series[i] * k + result[i - 1] * (1 - k)
     return result
 
 

@@ -42,19 +42,31 @@ class OandaClient:
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _get(self, path: str, params: dict = None) -> dict:
-        r = self.session.get(f"{self.base}{path}", params=params, timeout=10)
-        r.raise_for_status()
-        return r.json()
+        try:
+            r = self.session.get(f"{self.base}{path}", params=params, timeout=10)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            log.error(f"OANDA API GET error ({path}): {e}")
+            raise
 
     def _post(self, path: str, body: dict) -> dict:
-        r = self.session.post(f"{self.base}{path}", json=body, timeout=10)
-        r.raise_for_status()
-        return r.json()
+        try:
+            r = self.session.post(f"{self.base}{path}", json=body, timeout=10)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            log.error(f"OANDA API POST error ({path}): {e}")
+            raise
 
     def _put(self, path: str, body: dict) -> dict:
-        r = self.session.put(f"{self.base}{path}", json=body, timeout=10)
-        r.raise_for_status()
-        return r.json()
+        try:
+            r = self.session.put(f"{self.base}{path}", json=body, timeout=10)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            log.error(f"OANDA API PUT error ({path}): {e}")
+            raise
 
     # ── account ──────────────────────────────────────────────────────────────
 
@@ -219,15 +231,20 @@ class OandaClient:
         client_comment:     str = "",
     ) -> dict:
         """units > 0 = BUY, units < 0 = SELL."""
+        def _fmt_price(price: float, inst: str) -> str:
+            if "JPY" in inst: return f"{price:.3f}"
+            if "XAU" in inst: return f"{price:.2f}"
+            return f"{price:.5f}"
+
         order = {
             "type":       "MARKET",
             "instrument": instrument,
             "units":      str(units),
         }
         if stop_loss_price:
-            order["stopLossOnFill"]   = {"price": f"{stop_loss_price:.5f}"}
+            order["stopLossOnFill"]   = {"price": _fmt_price(stop_loss_price, instrument)}
         if take_profit_price:
-            order["takeProfitOnFill"] = {"price": f"{take_profit_price:.5f}"}
+            order["takeProfitOnFill"] = {"price": _fmt_price(take_profit_price, instrument)}
         if client_comment:
             order["clientExtensions"] = {"comment": client_comment[:128]}
 
@@ -253,15 +270,19 @@ class OandaClient:
         """
         Pass in a pre-fetched balance to avoid an extra API call per instrument.
         Falls back to fetching balance if not provided.
-        Uses the same dynamic pip-value formula as tradalgo.py to prevent
-        oversized positions on JPY and cross-currency pairs.
+        Uses dynamic pip-value formula to prevent oversized positions on JPY and cross-currency pairs.
         """
+        if sl_pips <= 0:
+            return 1
+
         if balance is None:
             balance = self.get_balance()
 
+        if balance <= 0:
+            return 1
+
         risk_amount = balance * (risk_pct / 100)
 
-        # Dynamic pip value calculation (mirrors tradalgo.py pip_value_usd_per_unit)
         def _pip_size(inst):
             if "JPY" in inst: return 0.01
             if "XAU" in inst: return 0.10
@@ -270,7 +291,6 @@ class OandaClient:
         pip = _pip_size(instrument)
         base, quote = instrument.split("_", 1) if "_" in instrument else (instrument, "USD")
 
-        # Fetch current mid-price for conversion (best-effort; falls back to 1.0)
         try:
             prices = self.get_prices([instrument])
             mid_price = prices.get(instrument, {}).get("mid", 0.0) or 0.0
@@ -280,13 +300,21 @@ class OandaClient:
         if quote == "USD":
             pip_value_per_unit = pip
         elif base == "USD":
-            pip_value_per_unit = pip / mid_price if mid_price > 0 else pip / 100.0
+            pip_value_per_unit = pip / mid_price if mid_price > 0 else pip / 155.0
         else:
-            # Cross pair: approximate via mid price of base currency vs USD
-            pip_value_per_unit = pip  # conservative fallback for cross pairs
+            # Cross pair: convert via reference rate if possible
+            if "JPY" in quote:
+                jpy_rate = 155.0
+                try:
+                    p = self.get_prices(["USD_JPY"])
+                    jpy_rate = p.get("USD_JPY", {}).get("mid", 155.0) or 155.0
+                except Exception: pass
+                pip_value_per_unit = pip / jpy_rate
+            else:
+                pip_value_per_unit = pip
 
-        if pip_value_per_unit <= 0:
-            pip_value_per_unit = pip
+        if pip_value_per_unit <= 0 or sl_pips <= 0:
+            return 1
 
         units = int(risk_amount / (sl_pips * pip_value_per_unit))
         return max(1, min(units, 1_000_000))

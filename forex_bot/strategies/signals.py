@@ -81,8 +81,9 @@ def bollinger_break(candles: list, instrument: str) -> dict:
     if any(is_nan(v) for v in [upper[i], lower[i], mid[i]]):
         return {"signal": None, "reason": "insufficient data"}
 
-    band_width = upper[i] - lower[i]
-    sl_pips = max(_sl_tp(instrument)[0], int(band_width * 5000))  # ATR-adjusted SL
+    pip = 0.01 if "JPY" in instrument else (0.10 if "XAU" in instrument else 0.0001)
+    band_width_pips = (upper[i] - lower[i]) / pip if pip > 0 else 0
+    sl_pips = max(_sl_tp(instrument)[0], int(band_width_pips * 0.5))  # ATR/width-adjusted SL
     _, tp_pips = _sl_tp(instrument)
 
     # Breakout above upper band (strong bullish momentum)

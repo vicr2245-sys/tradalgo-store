@@ -97,7 +97,9 @@ def sync_trade_state():
                 else:
                     close_reason = "Manual Close"
 
-                pl_pct = round((pl / max(entry * units, 1)) * 100, 4)
+                units_abs = abs(units)
+                pos_val_usd = (units_abs if instrument.startswith("USD_") else units_abs * 1.08) if "JPY" in instrument else (entry * units_abs)
+                pl_pct = round((pl / max(pos_val_usd, 1.0)) * 100, 4)
 
                 log.info(f"{'🏆 WIN' if pl>0 else '❌ LOSS'}  {instrument} "
                          f"| P&L={pl:+.2f} | {close_reason} | trade_id={trade_id}")
@@ -195,7 +197,9 @@ def _check_recent_transactions(current_open_ids: set):
                 entry     = float(ledger_entry.get("entry") or txn.get("price") or close_px)
                 direction = ledger_entry.get("direction") or ("BUY" if pl > 0 else "SELL")
                 units     = int(ledger_entry.get("units") or abs(int(item.get("units") or 1)))
-                pl_pct    = round((pl / max(entry * units, 1)) * 100, 4)
+                units_abs = abs(units)
+                pos_val_usd = (units_abs if inst.startswith("USD_") else units_abs * 1.08) if "JPY" in inst else (entry * units_abs)
+                pl_pct    = round((pl / max(pos_val_usd, 1.0)) * 100, 4)
 
                 if close_px and item_tid not in _seen_txn_ids:
                     log.info(f"Path-B close detected: {inst} P&L={pl:+.2f} txn={txn_id}")
@@ -354,16 +358,21 @@ def run_trading_cycle():
                 strategy   = reason_summary,
             )
 
+            def _fmt(price: float, inst: str) -> str:
+                if "JPY" in inst: return f"{price:.3f}"
+                if "XAU" in inst: return f"{price:.2f}"
+                return f"{price:.5f}"
+
             # 2. Send opened email
             alert_trade_opened(
                 instrument=instrument, direction=signal, units=abs(units),
-                entry=f"{entry_price:.5f}", sl=f"{sl_price:.5f}", tp=f"{tp_price:.5f}",
+                entry=_fmt(entry_price, instrument), sl=_fmt(sl_price, instrument), tp=_fmt(tp_price, instrument),
                 strategy=reason_summary,
             )
 
             log.info(
                 f"✅ {signal} {instrument} | {abs(units):,} units | "
-                f"entry={entry_price:.5f} SL={sl_price:.5f} TP={tp_price:.5f} | "
+                f"entry={_fmt(entry_price, instrument)} SL={_fmt(sl_price, instrument)} TP={_fmt(tp_price, instrument)} | "
                 f"score={consensus['score']}"
             )
             traded += 1
@@ -420,7 +429,8 @@ def main():
     BAR_INTERVAL  = 60 * 60   # 1 hour
     POLL_INTERVAL = 30        # check for closed trades every 30s
 
-    last_bar          = 0
+    now_init          = time.time()
+    last_bar          = now_init - (now_init % BAR_INTERVAL)
     last_poll         = 0
     last_daily_check  = 0
 
