@@ -2431,7 +2431,7 @@ button:active, .btn:active, .pair-btn:active, .tf:active, nav a:active, .tab-btn
 </header>
 
 <!-- ═══ RISK DISCLAIMER MODAL ═══ -->
-<div id="risk-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+<div id="risk-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
   <div style="background:#111827;border:1px solid #1e2d45;border-radius:16px;max-width:520px;width:90%;padding:36px;box-shadow:0 25px 60px rgba(0,0,0,0.7);">
     <div style="text-align:center;margin-bottom:20px;">
       <div style="font-size:2.5rem;margin-bottom:10px;">&#9888;</div>
@@ -2533,7 +2533,7 @@ async function confirmEnvSwitch(){
   if(!_pendingEnv) return;
   closeEnvModal();
   try{
-    const r = await fetch('/api/env-switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({env:_pendingEnv})});
+    const r = await fetch('/api/env-switch',{method:'POST',headers:{'Content-Type':'application/json','X-Tradalgo-Token':API_TOKEN},body:JSON.stringify({env:_pendingEnv})});
     const d = await r.json();
     if(d.status==='ok'){
       _updateEnvToggle(d.env);
@@ -2541,13 +2541,15 @@ async function confirmEnvSwitch(){
       if(badge) badge.textContent = d.env.charAt(0).toUpperCase()+d.env.slice(1);
       alert('\u2705 Switched to ' + d.env.toUpperCase() + '. Please restart Tradalgo to reconnect to the new API endpoint.');
     }
-  } catch(e){ alert('Failed to switch environment: '+e); }
 }
-document.addEventListener('DOMContentLoaded',function(){
-  var badge = document.getElementById('env-badge');
-  if(badge){ _updateEnvToggle(badge.textContent.toLowerCase()); }
-});
 </script>
+<div id="oanda-warning-banner" style="display:none;margin:12px 16px 0 16px;background:rgba(239,68,68,0.15);border:1px solid #ef4444;border-radius:8px;padding:12px 16px;color:#f8fafc;font-size:12px;align-items:center;justify-content:space-between;z-index:10;">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span style="font-size:16px;">⚠️</span>
+    <span><strong>OANDA Connection Alert:</strong> <span id="oanda-warning-text">Check your OANDA API Key & Account ID in Settings.</span></span>
+  </div>
+  <a href="/settings" style="background:#ef4444;color:#fff;padding:6px 14px;border-radius:6px;font-weight:700;text-decoration:none;font-size:11px;">Go to Settings &rarr;</a>
+</div>
 
 <div class="layout">
 
@@ -2738,10 +2740,24 @@ function selectInst(inst) {
   });
 }
 
+function showOandaBanner(msg) {
+  var b = document.getElementById('oanda-warning-banner');
+  var t = document.getElementById('oanda-warning-text');
+  if (b && t) {
+    t.textContent = msg || 'Check your OANDA API Key & Account ID in Settings.';
+    b.style.display = 'flex';
+  }
+}
+function hideOandaBanner() {
+  var b = document.getElementById('oanda-warning-banner');
+  if (b) b.style.display = 'none';
+}
+
 // ── Account ───────────────────────────────────────────────────────────────
 function refreshAccount() {
   apiFetch('/api/account').then(function(a) {
-    if (a.error) { sb('OANDA: ' + a.error, 'err'); return; }
+    if (a.error) { sb('OANDA: ' + a.error, 'err'); showOandaBanner(a.error); return; }
+    hideOandaBanner();
     var bal = parseFloat(a.balance || 0);
     var upl = parseFloat(a.unrealizedPL || 0);
     var balEl = document.getElementById('a-bal');
@@ -2755,7 +2771,10 @@ function refreshAccount() {
     document.getElementById('a-ot').textContent = a.openTradeCount || 0;
     document.getElementById('bal').textContent = newBal;
     sb('Updated ' + new Date().toLocaleTimeString(), 'ok');
-  }).catch(function(e) { sb('Account error: ' + e.message, 'err'); });
+  }).catch(function(e) {
+    sb('Account error: ' + e.message, 'err');
+    showOandaBanner('OANDA Unauthorized — check API Key and Account ID in Settings');
+  });
 }
 
 // ── Session ───────────────────────────────────────────────────────────────
@@ -3580,7 +3599,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <!-- Licence activation overlay -->
 <div id="lic-overlay" style="display:none !important;position:fixed;inset:0;z-index:99998;
-  background:rgba(11,14,26,.97);display:flex;align-items:center;justify-content:center">
+  background:rgba(11,14,26,.97);align-items:center;justify-content:center">
   <div style="background:#111827;border:1px solid #1e2d45;border-radius:16px;
     padding:40px;max-width:440px;width:90%;text-align:center">
     <div style="font-size:28px;font-weight:800;margin-bottom:4px">
@@ -4327,6 +4346,8 @@ input:focus, select:focus { border-color:var(--accent); }
 <div class="toast" id="toast">✓ Settings saved to tradalgo_config.json!</div>
 
 <script>
+const API_TOKEN = "{{ api_token }}";
+
 async function loadConfig() {
   try {
     const res = await fetch('/api/config');
@@ -4360,7 +4381,10 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
   try {
     const res = await fetch('/api/config', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tradalgo-Token': API_TOKEN
+      },
       body: JSON.stringify(payload)
     });
 
@@ -4692,7 +4716,8 @@ def route_backtest_page():
 @app.route("/settings")
 def route_settings_page():
     from flask import Response
-    return Response(_SETTINGS_HTML, mimetype="text/html; charset=utf-8")
+    html = _SETTINGS_HTML.replace("{{ api_token }}", _LOCAL_API_TOKEN)
+    return Response(html, mimetype="text/html; charset=utf-8")
 
 
 @app.route("/api/account")
