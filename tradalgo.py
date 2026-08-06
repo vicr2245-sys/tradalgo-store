@@ -175,8 +175,15 @@ def _load_config() -> dict:
 
 def _save_config(cfg: dict):
     with _cfg_lock:
-        full = {**_DEFAULT_CONFIG, **CFG, **cfg}
-        for key in cfg:
+        cleaned = dict(cfg)
+        for k in ("OANDA_API_KEY", "OANDA_ACCOUNT_ID", "EMAIL_SENDER", "EMAIL_PASSWORD", "EMAIL_RECIPIENT", "AI_BIAS_API_KEY"):
+            if k in cleaned and isinstance(cleaned[k], str):
+                cleaned[k] = cleaned[k].strip().strip("\"'").strip()
+        if "OANDA_ENV" in cleaned and isinstance(cleaned.get("OANDA_ENV"), str):
+            cleaned["OANDA_ENV"] = cleaned["OANDA_ENV"].strip().lower()
+
+        full = {**_DEFAULT_CONFIG, **CFG, **cleaned}
+        for key in cleaned:
             _env_sourced_keys.discard(key)
         _atomic_write_json(CONFIG_FILE, full)
         CFG.update(full)
@@ -1243,6 +1250,26 @@ class OandaClient:
         if len(digits) in (16, 17) and "-" not in aid:
             return f"{digits[:3]}-{digits[3:6]}-{digits[6:-3]}-{digits[-3:]}"
         return aid
+
+    def test_connection(self):
+        """Verifies OANDA API key & account ID against OANDA REST API."""
+        aid = self._aid()
+        key = str(CFG.get("OANDA_API_KEY", "")).strip()
+        env = CFG.get("OANDA_ENV", "practice")
+        if not aid or not key:
+            return False, "OANDA API Key or Account ID is missing."
+        try:
+            r = self.session.get(f"{self._base()}/v3/accounts/{aid}/summary", timeout=6)
+            if r.status_code == 200:
+                return True, "Connected to OANDA successfully."
+            elif r.status_code == 401:
+                return False, f"OANDA 401 Unauthorized: Invalid API Key or environment mismatch (currently in '{env}' mode)."
+            elif r.status_code == 404:
+                return False, f"OANDA 404 Not Found: Account ID '{aid}' not found in '{env}' mode."
+            else:
+                return False, f"OANDA returned HTTP {r.status_code}."
+        except Exception as e:
+            return False, f"OANDA connection error: {e}"
 
     def _get(self, path, params=None):
         r = self.session.get(f"{self._base()}{path}", params=params, timeout=10)
@@ -2458,8 +2485,8 @@ button:active, .btn:active, .pair-btn:active, .tf:active, nav a:active, .tab-btn
 </div>
 <script>
 (function(){
-  // Show risk disclaimer once per browser session
-  if(!sessionStorage.getItem('tradalgo_risk_accepted')){
+  // Show risk disclaimer once per browser
+  if(!localStorage.getItem('tradalgo_risk_accepted')){
     var overlay = document.getElementById('risk-modal-overlay');
     if(overlay){ overlay.style.display='flex'; document.body.style.overflow='hidden'; }
   }
@@ -2474,7 +2501,7 @@ button:active, .btn:active, .pair-btn:active, .tf:active, nav a:active, .tab-btn
   }
 })();
 function acceptRiskDisclaimer(){
-  sessionStorage.setItem('tradalgo_risk_accepted','1');
+  localStorage.setItem('tradalgo_risk_accepted','1');
   var overlay = document.getElementById('risk-modal-overlay');
   if(overlay){ overlay.style.display='none'; document.body.style.overflow=''; }
 }
@@ -3914,9 +3941,6 @@ tr:hover td{transition:background .15s}
 </header>
 <script>
 (function(){
-  if(!sessionStorage.getItem('tradalgo_risk_accepted')){
-    window.location.href='/';
-  }
   function _updateEnvToggle(env){
     var btn=document.getElementById('env-toggle-btn'); if(!btn)return;
     if(env==='live'){btn.textContent='\u25CF LIVE';btn.style.color='#ef4444';btn.style.borderColor='#ef4444';btn.style.background='rgba(239,68,68,0.12)';}
@@ -4272,7 +4296,6 @@ input:focus, select:focus { border-color:var(--accent); }
 </header>
 <script>
 (function(){
-  if(!sessionStorage.getItem('tradalgo_risk_accepted')){ window.location.href='/'; }
   function _ut(env){var b=document.getElementById('env-toggle-btn');if(!b)return;if(env==='live'){b.textContent='\u25CF LIVE';b.style.color='#ef4444';b.style.borderColor='#ef4444';b.style.background='rgba(239,68,68,0.12)';}else{b.textContent='\u25CF PRACTICE';b.style.color='#10b981';b.style.borderColor='#10b981';b.style.background='rgba(16,185,129,0.12)';}}
   fetch('/api/config').then(r=>r.json()).then(d=>_ut((d.OANDA_ENV||'practice').toLowerCase())).catch(()=>{});
 })();
@@ -4398,13 +4421,17 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
       body: JSON.stringify(payload)
     });
 
+    const d = await res.json();
     if (res.ok) {
       const toast = document.getElementById('toast');
+      toast.style.background = 'var(--green)';
+      toast.textContent = '✓ ' + (d.message || 'Settings saved & OANDA connection verified!');
       toast.style.display = 'block';
-      setTimeout(() => { toast.style.display = 'none'; }, 3500);
+      setTimeout(() => { toast.style.display = 'none'; }, 4500);
       await loadConfig();
     } else {
-      alert('Failed to save settings. Server responded with error.');
+      alert('Settings Saved, BUT OANDA Connection Warning:\n\n' + (d.message || 'Check your credentials and environment.'));
+      await loadConfig();
     }
   } catch (err) {
     alert('Failed to save settings: ' + err.message);
@@ -4486,7 +4513,6 @@ tr:hover td{background:var(--bg3);transition:background .15s}
 </header>
 <script>
 (function(){
-  if(!sessionStorage.getItem('tradalgo_risk_accepted')){ window.location.href='/'; }
   function _ut(env){var b=document.getElementById('env-toggle-btn');if(!b)return;if(env==='live'){b.textContent='\u25CF LIVE';b.style.color='#ef4444';b.style.borderColor='#ef4444';b.style.background='rgba(239,68,68,0.12)';}else{b.textContent='\u25CF PRACTICE';b.style.color='#10b981';b.style.borderColor='#10b981';b.style.background='rgba(16,185,129,0.12)';}}
   fetch('/api/config').then(r=>r.json()).then(d=>_ut((d.OANDA_ENV||'practice').toLowerCase())).catch(()=>{});
 })();
@@ -4852,11 +4878,17 @@ def route_config():
         oanda_changed = any(k in updates for k in ("OANDA_API_KEY", "OANDA_ACCOUNT_ID", "OANDA_ENV"))
         with _cfg_lock:
             _save_config(updates)
+            _candle_cache.clear()
+            msg = "Saved successfully."
+            test_ok = True
             if oanda_changed:
                 global _client
                 _client = OandaClient()
                 log.info("OandaClient re-initialized after config change")
-        return jsonify({"status": "ok", "client_reinitialized": oanda_changed})
+                test_ok, msg = _client.test_connection()
+                if not test_ok:
+                    return jsonify({"status": "error", "message": msg, "client_reinitialized": True}), 400
+        return jsonify({"status": "ok", "message": msg, "client_reinitialized": oanda_changed})
     with _cfg_lock:
         return jsonify(dict(CFG))
 
