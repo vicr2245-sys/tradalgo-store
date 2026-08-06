@@ -191,7 +191,8 @@ def _save_config(cfg: dict):
 CFG = _load_config()
 
 def _oanda_api_url():
-    return ("https://api-fxpractice.oanda.com" if CFG["OANDA_ENV"] == "practice"
+    env = str(CFG.get("OANDA_ENV", "practice")).strip().lower()
+    return ("https://api-fxpractice.oanda.com" if ("practice" in env or "demo" in env)
             else "https://api-fxtrade.oanda.com")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1234,14 +1235,16 @@ CACHE_TTL = 55 * 60
 
 class OandaClient:
     def __init__(self):
-        key = str(CFG.get("OANDA_API_KEY", "")).strip().strip("\"'").strip()
         self.session = requests.Session()
         self.session.headers.update({
-            "Authorization": f"Bearer {key}",
             "Content-Type":  "application/json",
             "Accept-Encoding": "gzip",
             "Connection": "keep-alive",
         })
+
+    def _auth_headers(self):
+        key = str(CFG.get("OANDA_API_KEY", "")).strip().strip("\"'").strip()
+        return {"Authorization": f"Bearer {key}"}
 
     def _base(self): return _oanda_api_url()
     def _aid(self):
@@ -1254,33 +1257,33 @@ class OandaClient:
     def test_connection(self):
         """Verifies OANDA API key & account ID against OANDA REST API."""
         aid = self._aid()
-        key = str(CFG.get("OANDA_API_KEY", "")).strip()
-        env = CFG.get("OANDA_ENV", "practice")
+        key = str(CFG.get("OANDA_API_KEY", "")).strip().strip("\"'").strip()
+        env = str(CFG.get("OANDA_ENV", "practice")).strip().lower()
         if not aid or not key:
-            return False, "OANDA API Key or Account ID is missing."
+            return False, "OANDA API Key or Account ID is missing in Settings."
         try:
-            r = self.session.get(f"{self._base()}/v3/accounts/{aid}/summary", timeout=6)
+            r = self.session.get(f"{self._base()}/v3/accounts/{aid}/summary", headers=self._auth_headers(), timeout=8)
             if r.status_code == 200:
-                return True, "Connected to OANDA successfully."
+                return True, f"Connected to OANDA successfully ({env.title()} mode)."
             elif r.status_code == 401:
-                return False, f"OANDA 401 Unauthorized: Invalid API Key or environment mismatch (currently in '{env}' mode)."
+                return False, f"OANDA 401 Unauthorized: Invalid API Key or environment mismatch (currently set to '{env.title()}' mode)."
             elif r.status_code == 404:
-                return False, f"OANDA 404 Not Found: Account ID '{aid}' not found in '{env}' mode."
+                return False, f"OANDA 404 Not Found: Account ID '{aid}' not found in '{env.title()}' mode."
             else:
                 return False, f"OANDA returned HTTP {r.status_code}."
         except Exception as e:
             return False, f"OANDA connection error: {e}"
 
     def _get(self, path, params=None):
-        r = self.session.get(f"{self._base()}{path}", params=params, timeout=10)
+        r = self.session.get(f"{self._base()}{path}", headers=self._auth_headers(), params=params, timeout=10)
         r.raise_for_status(); return r.json()
 
     def _post(self, path, body):
-        r = self.session.post(f"{self._base()}{path}", json=body, timeout=10)
+        r = self.session.post(f"{self._base()}{path}", headers=self._auth_headers(), json=body, timeout=10)
         r.raise_for_status(); return r.json()
 
     def _put(self, path, body):
-        r = self.session.put(f"{self._base()}{path}", json=body, timeout=10)
+        r = self.session.put(f"{self._base()}{path}", headers=self._auth_headers(), json=body, timeout=10)
         r.raise_for_status(); return r.json()
 
     def get_account(self):
