@@ -175,14 +175,9 @@ def _load_config() -> dict:
 
 def _save_config(cfg: dict):
     with _cfg_lock:
-        full = {**_DEFAULT_CONFIG, **cfg}
-        if _env_sourced_keys:
-            try:
-                on_disk = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
-            except Exception:
-                on_disk = {}
-            for key in _env_sourced_keys:
-                full[key] = on_disk.get(key, "")
+        full = {**_DEFAULT_CONFIG, **CFG, **cfg}
+        for key in cfg:
+            _env_sourced_keys.discard(key)
         _atomic_write_json(CONFIG_FILE, full)
         CFG.update(full)
 
@@ -4332,7 +4327,7 @@ input:focus, select:focus { border-color:var(--accent); }
 <div class="toast" id="toast">✓ Settings saved to tradalgo_config.json!</div>
 
 <script>
-document.addEventListener('DOMContentLoaded', async () => {
+async function loadConfig() {
   try {
     const res = await fetch('/api/config');
     const cfg = await res.json();
@@ -4343,7 +4338,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch (err) {
     console.error('Failed to load config:', err);
   }
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', loadConfig);
+} else {
+  loadConfig();
+}
 
 document.getElementById('settingsForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -4356,16 +4357,23 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
     }
   });
 
-  const res = await fetch('/api/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
 
-  if (res.ok) {
-    const toast = document.getElementById('toast');
-    toast.style.display = 'block';
-    setTimeout(() => { toast.style.display = 'none'; }, 3500);
+    if (res.ok) {
+      const toast = document.getElementById('toast');
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 3500);
+      await loadConfig();
+    } else {
+      alert('Failed to save settings. Server responded with error.');
+    }
+  } catch (err) {
+    alert('Failed to save settings: ' + err.message);
   }
 });
 </script>
@@ -4808,8 +4816,7 @@ def route_config():
         updates = freq.get_json() or {}
         oanda_changed = any(k in updates for k in ("OANDA_API_KEY", "OANDA_ACCOUNT_ID", "OANDA_ENV"))
         with _cfg_lock:
-            CFG.update(updates)
-            _save_config(CFG)
+            _save_config(updates)
             if oanda_changed:
                 global _client
                 _client = OandaClient()
