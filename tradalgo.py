@@ -80,7 +80,7 @@ def _atomic_write_json(path: Path, data) -> None:
             try: tmp_path.unlink()
             except Exception: pass
 
-_cfg_lock = threading.Lock()
+_cfg_lock = threading.RLock()
 
 _DEFAULT_CONFIG = {
     "OANDA_ACCOUNT_ID": "",
@@ -369,7 +369,7 @@ _ledger: dict = {}
 # guards a dict(_ledger) snapshot so each save serializes a frozen copy
 # instead of a dict that can change mid-serialize, and also makes each
 # mutate-then-save sequence atomic with respect to other mutations.
-_ledger_lock = threading.Lock()
+_ledger_lock = threading.RLock()
 
 def _ledger_save():
     try:
@@ -439,7 +439,7 @@ _perf: dict = {"trades": [], "daily": {}, "weekly": {}, "starting_balance": None
 # compound read-modify-write in record_close() (check-then-increment on
 # _perf["daily"][today]) in case a future feature (e.g. a manual "close
 # trade" API endpoint) ever adds a second writer.
-_perf_lock = threading.Lock()
+_perf_lock = threading.RLock()
 
 def _perf_save():
     try:
@@ -452,7 +452,7 @@ def _perf_save():
 # ── Activity feed ─────────────────────────────────────────────────────────────
 _feed: list = []   # in-memory ring buffer, max 50 events
 _FEED_MAX   = 50
-_feed_lock  = threading.Lock()
+_feed_lock  = threading.RLock()
 
 _FRIENDLY_NAMES = {
     "EUR_USD": "Euro / Dollar",   "GBP_USD": "Pound / Dollar",
