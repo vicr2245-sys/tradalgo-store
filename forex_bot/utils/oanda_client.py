@@ -228,6 +228,7 @@ class OandaClient:
         units:              int,
         stop_loss_price:    Optional[float] = None,
         take_profit_price:  Optional[float] = None,
+        trailing_stop_pips: Optional[float] = None,
         client_comment:     str = "",
     ) -> dict:
         """units > 0 = BUY, units < 0 = SELL."""
@@ -245,6 +246,12 @@ class OandaClient:
             order["stopLossOnFill"]   = {"price": _fmt_price(stop_loss_price, instrument)}
         if take_profit_price:
             order["takeProfitOnFill"] = {"price": _fmt_price(take_profit_price, instrument)}
+        if trailing_stop_pips and trailing_stop_pips > 0:
+            def _pip_size_tsl(inst):
+                if "JPY" in inst: return 0.01
+                if "XAU" in inst: return 0.10
+                return 0.0001
+            order["trailingStopLossOnFill"] = {"distance": _fmt_price(trailing_stop_pips * _pip_size_tsl(instrument), instrument)}
         if client_comment:
             order["clientExtensions"] = {"comment": client_comment[:128]}
 

@@ -104,6 +104,7 @@ _DEFAULT_CONFIG = {
     "MAX_OPEN_TRADES":     5,
     "DEFAULT_SL_PIPS":     20,
     "DEFAULT_TP_PIPS":     50,
+    "TRAILING_STOP_PIPS":  0,
     "GOLD_SL_PIPS":        200,
     "GOLD_TP_PIPS":        400,
     "STRATEGY_WEIGHTS": {
@@ -1359,7 +1360,7 @@ class OandaClient:
     def invalidate_cache(self): _candle_cache.clear()
 
     def place_market_order(self, instrument, units, stop_loss_price=None,
-                           take_profit_price=None, client_comment=""):
+                           take_profit_price=None, trailing_stop_pips=None, client_comment=""):
         def _fmt(p, inst):
             if "JPY" in inst: return f"{p:.3f}"
             if "XAU" in inst: return f"{p:.2f}"
@@ -1367,6 +1368,12 @@ class OandaClient:
         order={"type":"MARKET","instrument":instrument,"units":str(units)}
         if stop_loss_price:   order["stopLossOnFill"]  ={"price":_fmt(stop_loss_price, instrument)}
         if take_profit_price: order["takeProfitOnFill"]={"price":_fmt(take_profit_price, instrument)}
+        if trailing_stop_pips and trailing_stop_pips > 0:
+            def _pip_tsl(inst):
+                if "JPY" in inst: return 0.01
+                if "XAU" in inst: return 0.10
+                return 0.0001
+            order["trailingStopLossOnFill"]={"distance":_fmt(trailing_stop_pips * _pip_tsl(instrument), instrument)}
         if client_comment:    order["clientExtensions"]={"comment":client_comment[:128]}
         return self._post(f"/v3/accounts/{self._aid()}/orders",{"order":order})
 
@@ -4387,6 +4394,10 @@ input:focus, select:focus { border-color:var(--accent); }
           <label>Default Take Profit (Pips)</label>
           <input type="number" id="DEFAULT_TP_PIPS" placeholder="40">
         </div>
+        <div class="form-group">
+          <label>Trailing Stop Loss (Pips, 0 to disable)</label>
+          <input type="number" id="TRAILING_STOP_PIPS" placeholder="0">
+        </div>
         <div class="form-group full">
           <label>AI Sentiment API Key (Anthropic / Gemini)</label>
           <input type="password" id="AI_BIAS_API_KEY" placeholder="Optional AI API Key">
@@ -4426,7 +4437,7 @@ if (document.readyState === 'loading') {
 
 document.getElementById('settingsForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const fields = ['OANDA_ACCOUNT_ID', 'OANDA_API_KEY', 'OANDA_ENV', 'EMAIL_SENDER', 'EMAIL_PASSWORD', 'EMAIL_RECIPIENT', 'RISK_PER_TRADE_PCT', 'MAX_OPEN_TRADES', 'DEFAULT_SL_PIPS', 'DEFAULT_TP_PIPS', 'AI_BIAS_API_KEY'];
+  const fields = ['OANDA_ACCOUNT_ID', 'OANDA_API_KEY', 'OANDA_ENV', 'EMAIL_SENDER', 'EMAIL_PASSWORD', 'EMAIL_RECIPIENT', 'RISK_PER_TRADE_PCT', 'MAX_OPEN_TRADES', 'DEFAULT_SL_PIPS', 'DEFAULT_TP_PIPS', 'TRAILING_STOP_PIPS', 'AI_BIAS_API_KEY'];
   const payload = {};
   fields.forEach(f => {
     const el = document.getElementById(f);
@@ -5503,7 +5514,14 @@ def trading_cycle():
             d=+1 if con["signal"]=="BUY" else -1
             sl_p=_price_from_pips(instrument,ep,sl_pips,-d); tp_p=_price_from_pips(instrument,ep,tp_pips,d)
             rs=" | ".join(con["reasons"][:2]) or "multi-strategy"
-            result=_client.place_market_order(instrument,units,sl_p,tp_p,rs)
+            result=_client.place_market_order(
+                instrument,
+                units,
+                stop_loss_price=sl_p,
+                take_profit_price=tp_p,
+                trailing_stop_pips=CFG.get("TRAILING_STOP_PIPS", 0),
+                client_comment=rs
+            )
             tid=(result.get("orderFillTransaction",{}).get("tradeOpened",{}).get("tradeID")
                  or result.get("orderFillTransaction",{}).get("id"))
             if not tid:
