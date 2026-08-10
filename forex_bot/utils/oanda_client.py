@@ -246,12 +246,13 @@ class OandaClient:
             order["stopLossOnFill"]   = {"price": _fmt_price(stop_loss_price, instrument)}
         if take_profit_price:
             order["takeProfitOnFill"] = {"price": _fmt_price(take_profit_price, instrument)}
-        if trailing_stop_pips and trailing_stop_pips > 0:
+        tsl = float(trailing_stop_pips or 0)
+        if tsl > 0:
             def _pip_size_tsl(inst):
                 if "JPY" in inst: return 0.01
                 if "XAU" in inst: return 0.10
                 return 0.0001
-            order["trailingStopLossOnFill"] = {"distance": _fmt_price(trailing_stop_pips * _pip_size_tsl(instrument), instrument)}
+            order["trailingStopLossOnFill"] = {"distance": _fmt_price(tsl * _pip_size_tsl(instrument), instrument)}
         if client_comment:
             order["clientExtensions"] = {"comment": client_comment[:128]}
 
@@ -279,13 +280,13 @@ class OandaClient:
         Falls back to fetching balance if not provided.
         Uses dynamic pip-value formula to prevent oversized positions on JPY and cross-currency pairs.
         """
-        if sl_pips <= 0:
-            return 1
-
         if balance is None:
             balance = self.get_balance()
 
         if balance <= 0:
+            return 0
+
+        if sl_pips <= 0:
             return 1
 
         risk_amount = balance * (risk_pct / 100)

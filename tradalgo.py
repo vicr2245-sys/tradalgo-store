@@ -36,6 +36,8 @@ from pathlib              import Path
 try:
     import numpy as np
     import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util import Retry
     from flask import Flask, Response, jsonify, request as freq, stream_with_context
 except ImportError as _e:
     print(f"\n  Missing dependency: {_e}")
@@ -120,6 +122,7 @@ _DEFAULT_CONFIG = {
     "LOG_LEVEL":            "INFO",
     "DASHBOARD_PORT":       5000,
     "LIVE_TRADING_ENABLED": True,
+    "MAX_SLIPPAGE_PIPS":    2.0,
     "RISK_GUARD_ENABLED":   True,
     "RISK_GUARD_MAX_DD_PCT": 10.0,
     "ONBOARDING_DONE":      False,
@@ -897,8 +900,11 @@ def _send_email(subject, html_body):
         log.info(f"Email sent: {subject}")
     except smtplib.SMTPAuthenticationError as e:
         log.error(f"Email failed (Gmail Authentication Error 535 - Bad Credentials for {CFG.get('EMAIL_SENDER')}): {e}")
-    except Exception as e:
-        log.error(f"Email failed: {e}")
+    except (OSError, Exception) as e:
+        if "getaddrinfo" in str(e) or "11004" in str(e) or "11001" in str(e):
+            log.warning(f"Email notification skipped due to temporary network/DNS drop: {e}")
+        else:
+            log.error(f"Email failed: {e}")
 
 # Responsive email wrapper — uses a table-based layout (the only thing
 # that reliably constrains width across Gmail/Outlook/Apple Mail mobile apps).
@@ -1216,7 +1222,7 @@ def calculate_position_units(instrument: str, sl_pips: float, risk_pct: float,
     and the backtester so their P&L figures are directly comparable.
     Returns None if a required conversion rate is unavailable (caller should skip the trade).
     """
-    if sl_pips <= 0 or balance <= 0:
+    if balance <= 0 or sl_pips <= 0:
         return 1
     risk = balance * (risk_pct / 100)
     ppv  = pip_value_usd_per_unit(instrument, price_lookup)
@@ -1237,6 +1243,15 @@ CACHE_TTL = 55 * 60
 class OandaClient:
     def __init__(self):
         self.session = requests.Session()
+        retries = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504],
+            raise_on_status=False
+        )
+        adapter = HTTPAdapter(pool_connections=25, pool_maxsize=50, max_retries=retries)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.session.headers.update({
             "Content-Type":  "application/json",
             "Accept-Encoding": "gzip",
@@ -1360,20 +1375,23 @@ class OandaClient:
     def invalidate_cache(self): _candle_cache.clear()
 
     def place_market_order(self, instrument, units, stop_loss_price=None,
-                           take_profit_price=None, trailing_stop_pips=None, client_comment=""):
+                           take_profit_price=None, trailing_stop_pips=None, client_comment="",
+                           price_bound=None):
         def _fmt(p, inst):
             if "JPY" in inst: return f"{p:.3f}"
             if "XAU" in inst: return f"{p:.2f}"
             return f"{p:.5f}"
         order={"type":"MARKET","instrument":instrument,"units":str(units)}
+        if price_bound:       order["priceBound"]      =_fmt(price_bound, instrument)
         if stop_loss_price:   order["stopLossOnFill"]  ={"price":_fmt(stop_loss_price, instrument)}
         if take_profit_price: order["takeProfitOnFill"]={"price":_fmt(take_profit_price, instrument)}
-        if trailing_stop_pips and trailing_stop_pips > 0:
+        tsl = float(trailing_stop_pips or 0)
+        if tsl > 0:
             def _pip_tsl(inst):
                 if "JPY" in inst: return 0.01
                 if "XAU" in inst: return 0.10
                 return 0.0001
-            order["trailingStopLossOnFill"]={"distance":_fmt(trailing_stop_pips * _pip_tsl(instrument), instrument)}
+            order["trailingStopLossOnFill"]={"distance":_fmt(tsl * _pip_tsl(instrument), instrument)}
         if client_comment:    order["clientExtensions"]={"comment":client_comment[:128]}
         return self._post(f"/v3/accounts/{self._aid()}/orders",{"order":order})
 
@@ -1926,6 +1944,7 @@ def run_backtest(instruments=None, granularity=None, candle_count=None, initial_
             # since backtesting doesn't have a second instrument's aligned
             # live price to convert with.
             units=calculate_position_units(instrument, sl_p, CFG["RISK_PER_TRADE_PCT"], balance)
+            if not units: equity.append(balance); continue
             pl_m=pl*units; balance=max(0,balance+pl_m)
             trades.append({"instrument":instrument,"time":current["time"],
                 "signal":con["signal"],"entry":round(entry,5),"outcome":outcome,
@@ -5116,7 +5135,8 @@ def route_why_no_trades():
 
             # Run strategies
             sr  = run_all_strategies(candles, inst)
-            con = consensus_signal(sr, CFG["STRATEGY_WEIGHTS"], threshold=0.35)
+            thresh = CFG.get("CONSENSUS_THRESHOLD", 0.45)
+            con = consensus_signal(sr, CFG["STRATEGY_WEIGHTS"], threshold=thresh)
 
             inst_result["strategy_signals"] = {
                 name: res.get("signal") for name, res in sr.items()
@@ -5125,7 +5145,7 @@ def route_why_no_trades():
             inst_result["consensus_score"]  = con["score"]
 
             if not con["signal"]:
-                inst_result["skip_reason"] = f"No consensus signal (score {con['score']:.2f} < 0.35 threshold)"
+                inst_result["skip_reason"] = f"No consensus signal (score {con['score']:.2f} < {thresh:.2f} threshold)"
                 no_signal_count += 1
                 result["instruments"][inst] = inst_result
                 continue
@@ -5513,6 +5533,8 @@ def trading_cycle():
             if not ep: continue
             d=+1 if con["signal"]=="BUY" else -1
             sl_p=_price_from_pips(instrument,ep,sl_pips,-d); tp_p=_price_from_pips(instrument,ep,tp_pips,d)
+            max_slip=float(CFG.get("MAX_SLIPPAGE_PIPS", 2.0))
+            pb_p=_price_from_pips(instrument,ep,max_slip,d) if max_slip > 0 else None
             rs=" | ".join(con["reasons"][:2]) or "multi-strategy"
             result=_client.place_market_order(
                 instrument,
@@ -5520,7 +5542,8 @@ def trading_cycle():
                 stop_loss_price=sl_p,
                 take_profit_price=tp_p,
                 trailing_stop_pips=CFG.get("TRAILING_STOP_PIPS", 0),
-                client_comment=rs
+                client_comment=rs,
+                price_bound=pb_p
             )
             tid=(result.get("orderFillTransaction",{}).get("tradeOpened",{}).get("tradeID")
                  or result.get("orderFillTransaction",{}).get("id"))
@@ -5590,6 +5613,7 @@ def run_bot():
             connected = True
             # Run AI bias immediately on startup if not already done today
             refresh_ai_bias_if_needed()
+            _send_email("🚀 Tradalgo Started", f"Tradalgo has been successfully started and connected to OANDA account {acct['id']}.")
             break
         except Exception as e:
             print(f"  ⚠ OANDA connection attempt {attempt}/5 failed: {e}")
@@ -5609,6 +5633,7 @@ def run_bot():
                 acct = _client.get_account()
                 print(f"  ✅ OANDA connected: {acct['id']}")
                 seed_from_oanda(_client.get_open_trades())
+                _send_email("🚀 Tradalgo Started", f"Tradalgo has been successfully started and connected to OANDA account {acct['id']}.")
                 break
             except Exception as e:
                 print(f"  ⚠ Still can't connect: {e}")
@@ -6049,27 +6074,27 @@ def run_setup_if_needed():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def run_email_test():
-    print("\n" + "═"*52)
-    print("  Tradalgo — Email Diagnostic")
-    print("═"*52 + "\n")
+    print("\n" + "="*52)
+    print("  Tradalgo - Email Diagnostic")
+    print("="*52 + "\n")
     sender_str = str(CFG.get("EMAIL_SENDER") or "").strip()
     if not sender_str or "your" in sender_str.lower():
-        print("  ❌ EMAIL_SENDER not configured. Run --setup first.\n"); return
+        print("  [X] EMAIL_SENDER not configured. Run --setup first.\n"); return
     print(f"  Sender    : {sender_str}")
     print(f"  Recipient : {CFG['EMAIL_RECIPIENT']}")
     print(f"  SMTP      : {CFG['SMTP_HOST']}:{CFG['SMTP_PORT']}\n")
-    print("  Testing SMTP connection…")
+    print("  Testing SMTP connection...")
     try:
         sender   = str(CFG.get("EMAIL_SENDER", "")).strip()
         password = str(CFG.get("EMAIL_PASSWORD", "")).replace(" ", "").strip()
         with smtplib.SMTP(CFG.get("SMTP_HOST", "smtp.gmail.com"), int(CFG.get("SMTP_PORT", 587)), timeout=10) as s:
             s.ehlo(); s.starttls(); s.login(sender, password)
-        print("  ✅ Gmail login OK\n")
+        print("  [OK] Gmail login OK\n")
     except smtplib.SMTPAuthenticationError as e:
-        print(f"  ❌ Authentication failed for {CFG.get('EMAIL_SENDER')} — check App Password in config ({e})\n"); return
+        print(f"  [X] Authentication failed for {CFG.get('EMAIL_SENDER')} - check App Password in config ({e})\n"); return
     except Exception as e:
-        print(f"  ❌ SMTP error: {e}\n"); return
-    print("  Sending test emails…")
+        print(f"  [X] SMTP error: {e}\n"); return
+    print("  Sending test emails...")
     email_session("London", 10)
     email_opened("EUR_USD","BUY",10000,"1.08450","1.08250","1.08850","EMA Cross (TEST)")
     email_closed("EUR_USD","BUY","1.08450","1.08250",-20.0,-0.20,"Stop Loss")
@@ -6092,7 +6117,7 @@ def run_email_test():
         set_starting_balance(test_balance)
     email_weekly_summary("2026-W24", test_week_stats, test_balance * 1.0094)
 
-    print("  ✅ 6 emails sent — check your inbox (and spam folder)\n")
+    print("  [OK] 6 emails sent - check your inbox (and spam folder)\n")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ── SECTION 15: MAIN ENTRY POINT ─────────────────────────────────────────────

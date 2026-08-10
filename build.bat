@@ -31,6 +31,7 @@ pyinstaller ^
     --onefile ^
     --name tradalgo ^
     --console ^
+    --icon=icon.ico ^
     --hidden-import flask ^
     --hidden-import flask.templating ^
     --hidden-import jinja2 ^
