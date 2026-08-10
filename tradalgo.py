@@ -2821,19 +2821,28 @@ function hideOandaBanner() {
 }
 
 // ── Account ───────────────────────────────────────────────────────────────
+var CURRENCY_SYM = '$';
+function getCurrSym(c) {
+  if (c === 'EUR') return '€';
+  if (c === 'GBP') return '£';
+  if (c === 'JPY') return '¥';
+  return '$';
+}
+
 function refreshAccount() {
   apiFetch('/api/account').then(function(a) {
     if (a.error) { sb('OANDA: ' + a.error, 'err'); showOandaBanner(a.error); return; }
     hideOandaBanner();
+    if (a.currency) CURRENCY_SYM = getCurrSym(a.currency);
     var bal = parseFloat(a.balance || 0);
     var upl = parseFloat(a.unrealizedPL || 0);
     var balEl = document.getElementById('a-bal');
-    var newBal = '$' + bal.toLocaleString('en', {minimumFractionDigits:2});
+    var newBal = CURRENCY_SYM + bal.toLocaleString('en', {minimumFractionDigits:2});
     if (balEl.textContent && balEl.textContent !== '—' && balEl.textContent !== newBal) {
-      flashEl(balEl, bal > parseFloat(balEl.textContent.replace(/[$,]/g,'')));
+      flashEl(balEl, bal > parseFloat(balEl.textContent.replace(/[^0-9.]/g,'')));
     }
     balEl.textContent = newBal;
-    document.getElementById('a-upl').textContent = (upl >= 0 ? '+' : '') + upl.toFixed(2);
+    document.getElementById('a-upl').textContent = (upl >= 0 ? '+' : '') + CURRENCY_SYM + Math.abs(upl).toFixed(2);
     document.getElementById('a-upl').className = 'sv ' + (upl >= 0 ? 'green' : 'red');
     document.getElementById('a-ot').textContent = a.openTradeCount || 0;
     document.getElementById('bal').textContent = newBal;
@@ -2879,7 +2888,7 @@ function refreshTrades() {
           '<div class="tc-row"><span>SL</span><span>' + (t.stopLossOrder ? parseFloat(t.stopLossOrder.price).toFixed(5) : '—') + '</span></div>' +
           '<div class="tc-row"><span>TP</span><span>' + (t.takeProfitOrder ? parseFloat(t.takeProfitOrder.price).toFixed(5) : '—') + '</span></div>' +
           '<div class="tc-row" style="margin-top:4px"><span>P&amp;L</span>' +
-            '<span class="tc-pl ' + (pl >= 0 ? 'green' : 'red') + '">' + (pl >= 0 ? '+' : '') + '$' + pl.toFixed(2) + '</span>' +
+            '<span class="tc-pl ' + (pl >= 0 ? 'green' : 'red') + '">' + (pl >= 0 ? '+' : '') + CURRENCY_SYM + Math.abs(pl).toFixed(2) + '</span>' +
           '</div>' +
         '</div>';
       }).join('');
@@ -2891,7 +2900,7 @@ function refreshTrades() {
         var pl    = parseFloat(t.unrealizedPL || 0);
         var plEl  = cards[i].querySelector('.tc-pl');
         if (plEl) {
-          var newVal = (pl >= 0 ? '+' : '') + '$' + pl.toFixed(2);
+          var newVal = (pl >= 0 ? '+' : '') + CURRENCY_SYM + Math.abs(pl).toFixed(2);
           if (plEl.textContent !== newVal) {
             plEl.textContent  = newVal;
             plEl.className    = 'tc-pl ' + (pl >= 0 ? 'green' : 'red');
@@ -2910,7 +2919,7 @@ function refreshToday() {
     document.getElementById('t-trades').textContent = d.trades || 0;
     document.getElementById('t-wins').textContent   = d.wins   || 0;
     var plEl = document.getElementById('t-pl');
-    plEl.textContent = (pl >= 0 ? '+' : '') + '$' + Math.abs(pl).toFixed(2);
+    plEl.textContent = (pl >= 0 ? '+' : '') + CURRENCY_SYM + Math.abs(pl).toFixed(2);
     plEl.className = 'sv ' + (pl >= 0 ? 'green' : 'red');
   }).catch(function(){});
 }
