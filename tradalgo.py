@@ -1314,9 +1314,18 @@ class OandaClient:
     def get_trade(self, tid):
         return self._get(f"/v3/accounts/{self._aid()}/trades/{tid}")["trade"]
 
-    def get_transactions(self, count=30):
-        return self._get(f"/v3/accounts/{self._aid()}/transactions",
-                         params={"count":count}).get("transactions",[])
+    def get_transactions(self, count=50, since_id=None):
+        aid = self._aid()
+        try:
+            if since_id:
+                return self._get(f"/v3/accounts/{aid}/transactions/sinceid", params={"id": since_id}).get("transactions", [])
+            meta = self._get(f"/v3/accounts/{aid}/transactions")
+            last_id = int(meta.get("lastTransactionID", 1))
+            from_id = max(1, last_id - count)
+            return self._get(f"/v3/accounts/{aid}/transactions/idrange", params={"from": from_id, "to": last_id}).get("transactions", [])
+        except Exception as e:
+            log.debug(f"get_transactions error: {e}")
+            return []
 
     def get_price(self, instrument):
         data = self._get(f"/v3/accounts/{self._aid()}/pricing",
@@ -5437,28 +5446,52 @@ def sync_trades():
         open_trades    = _client.get_open_trades()
         oanda_open_ids = {t["id"] for t in open_trades}
         closed_ids     = all_ledger_ids() - oanda_open_ids
-        # Path A: ledger diff
-        for tid in closed_ids:
-            entry=get_ledger(tid)
-            if not entry: remove_ledger(tid); continue
-            inst=entry["instrument"]; dirn=entry["direction"]
-            ep=float(entry.get("entry") or 0); units=int(entry.get("units") or 1)
-            try:
-                closed=_client.get_trade(tid)
-                pl=float(closed.get("realizedPL") or 0)
-                cpx=float(closed.get("averageClosePrice") or ep)
-                reason="Take Profit ✅" if (closed.get("takeProfitOrder") and pl>0) else ("Stop Loss" if pl<0 else "Manual Close")
-                pl_pct=round((pl/max(ep*units,1))*100,4)
-                log.info(f"{'🏆 WIN' if pl>0 else '❌ LOSS'} {inst} P&L={pl:+.2f} | {reason}")
-                record_close(tid,inst,dirn,ep,cpx,pl,pl_pct,reason,entry.get("strategy",""),entry.get("opened_at",""))
-                email_closed(inst,dirn,f"{ep:.5f}",f"{cpx:.5f}",pl,pl_pct,reason)
-                feed_close(inst, dirn, pl, reason)
-                if pl>0: email_win(inst,dirn,f"{ep:.5f}",f"{cpx:.5f}",pl,pl_pct,entry.get("strategy",""))
-            except Exception as e:
-                log.error(f"Path-A error {tid}: {e}")
-                try: email_closed(inst,dirn,f"{ep:.5f}","?",0,0,"Closed (details unavailable)")
-                except Exception as ex: log.debug(f"Path-A email fallback error: {ex}")
-            finally: remove_ledger(tid)
+
+        if closed_ids:
+            txns = _client.get_transactions(count=50)
+            txn_map = {}
+            for txn in txns:
+                if txn.get("type") == "ORDER_FILL":
+                    closed_items = txn.get("tradesClosed", []) + ([txn.get("tradeReduced")] if txn.get("tradeReduced") else [])
+                    for item in closed_items:
+                        if item and "tradeID" in item:
+                            txn_map[str(item["tradeID"])] = (txn, item)
+
+            for tid in closed_ids:
+                entry = get_ledger(tid)
+                if not entry:
+                    remove_ledger(tid)
+                    continue
+                inst  = entry["instrument"]
+                dirn  = entry["direction"]
+                ep    = float(entry.get("entry") or 0)
+                units = int(entry.get("units") or 1)
+
+                if tid in txn_map:
+                    txn, item = txn_map[tid]
+                    pl    = float(item.get("realizedPL") or txn.get("pl") or 0)
+                    cpx   = float(item.get("price") or txn.get("price") or ep)
+                    r_raw = str(txn.get("reason", ""))
+                    if "TRAILING_STOP" in r_raw:
+                        reason = "Trailing Stop ✅" if pl >= 0 else "Trailing Stop ❌"
+                    elif "TAKE_PROFIT" in r_raw:
+                        reason = "Take Profit ✅"
+                    elif "STOP_LOSS" in r_raw:
+                        reason = "Stop Loss ❌"
+                    else:
+                        reason = "Manual Close"
+
+                    pl_pct = round((pl / max(ep * units, 1)) * 100, 4)
+                    log.info(f"{'🏆 WIN' if pl>=0 else '❌ LOSS'} {inst} P&L={pl:+.2f} | {reason}")
+                    record_close(tid, inst, dirn, ep, cpx, pl, pl_pct, reason, entry.get("strategy", ""), entry.get("opened_at", ""))
+                    email_closed(inst, dirn, f"{ep:.5f}", f"{cpx:.5f}", pl, pl_pct, reason)
+                    feed_close(inst, dirn, pl, reason)
+                    if pl > 0:
+                        email_win(inst, dirn, f"{ep:.5f}", f"{cpx:.5f}", pl, pl_pct, entry.get("strategy", ""))
+                else:
+                    log.warning(f"Trade {tid} closed on OANDA but transaction details not found in recent history.")
+                    email_closed(inst, dirn, f"{ep:.5f}", "?", 0, 0, "Closed (details unavailable)")
+                remove_ledger(tid)
         # Path B: transaction sweep
         try:
             for txn in _client.get_transactions(count=30):
