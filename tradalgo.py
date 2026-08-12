@@ -481,27 +481,36 @@ def feed_push(event_type: str, data: dict):
         if len(_feed) > _FEED_MAX:
             _feed.pop()
 
+def account_currency_sym():
+    try:
+        curr = OandaClient().get_account().get("currency", "USD")
+        return {"EUR": "€", "GBP": "£", "JPY": "¥"}.get(curr, "$")
+    except Exception:
+        return "$"
+
 def feed_open(instrument, direction, entry, sl, tp, strategy):
+    sym = account_currency_sym()
     dir_word = "Bought" if direction == "BUY" else "Sold"
     feed_push("open", {
         "title":    f"{dir_word} {_friendly(instrument)}",
         "body":     f"The bot opened a {'buy' if direction=='BUY' else 'sell'} trade. "
-                    f"It will close automatically if the safety price (${sl}) is hit, "
-                    f"or take profit at ${tp}.",
+                    f"It will close automatically if the safety price ({sl}) is hit, "
+                    f"or take profit at {tp}.",
         "instrument": instrument,
         "direction":  direction,
         "entry":      entry,
     })
 
 def feed_close(instrument, direction, pl, reason):
+    sym = account_currency_sym()
     won      = pl > 0
     dir_word = "Bought" if direction == "BUY" else "Sold"
     if won:
-        body = f"{dir_word} and the target price was hit. The bot made a profit of ${abs(pl):.2f} on this trade."
+        body = f"{dir_word} and the target price was hit. The bot made a profit of {sym}{abs(pl):.2f} on this trade."
     else:
-        body = f"{dir_word} and the safety price was hit. The bot cut the loss at ${abs(pl):.2f} to protect your account."
+        body = f"{dir_word} and the safety price was hit. The bot cut the loss at {sym}{abs(pl):.2f} to protect your account."
     feed_push("close_win" if won else "close_loss", {
-        "title":      f"{_friendly(instrument)} trade closed · {'Won' if won else 'Lost'} ${abs(pl):.2f}",
+        "title":      f"{_friendly(instrument)} trade closed · {'Won' if won else 'Lost'} {sym}{abs(pl):.2f}",
         "body":       body,
         "instrument": instrument,
         "pl":         pl,
