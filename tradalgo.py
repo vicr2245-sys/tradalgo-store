@@ -323,6 +323,42 @@ def _atr(candles, period=14):
         r[i] = (r[i-1]*(period-1) + tr[i]) / period
     return r
 
+def _adx(candles, period=14):
+    if len(candles) < period * 2:
+        return np.full(len(candles), np.nan)
+    h = np.array([float(c.get('mid',{}).get('h') or c.get('h',0)) for c in candles])
+    l = np.array([float(c.get('mid',{}).get('l') or c.get('l',0)) for c in candles])
+    c = np.array([float(c.get('mid',{}).get('c') or c.get('c',0)) for c in candles])
+    n = len(candles)
+    tr = np.zeros(n)
+    p_dm = np.zeros(n)
+    m_dm = np.zeros(n)
+    for i in range(1, n):
+        up = h[i] - h[i-1]
+        dn = l[i-1] - l[i]
+        tr[i] = max(h[i] - l[i], abs(h[i] - c[i-1]), abs(l[i] - c[i-1]))
+        p_dm[i] = up if (up > dn and up > 0) else 0.0
+        m_dm[i] = dn if (dn > up and dn > 0) else 0.0
+    atr_smooth = np.full(n, np.nan)
+    p_di_smooth = np.full(n, np.nan)
+    m_di_smooth = np.full(n, np.nan)
+    atr_smooth[period] = tr[1:period+1].sum()
+    p_di_smooth[period] = p_dm[1:period+1].sum()
+    m_di_smooth[period] = m_dm[1:period+1].sum()
+    for i in range(period+1, n):
+        atr_smooth[i] = atr_smooth[i-1] - (atr_smooth[i-1] / period) + tr[i]
+        p_di_smooth[i] = p_di_smooth[i-1] - (p_di_smooth[i-1] / period) + p_dm[i]
+        m_di_smooth[i] = m_di_smooth[i-1] - (m_di_smooth[i-1] / period) + m_dm[i]
+    p_di = 100 * (p_di_smooth / np.maximum(atr_smooth, 1e-9))
+    m_di = 100 * (m_di_smooth / np.maximum(atr_smooth, 1e-9))
+    dx = 100 * (np.abs(p_di - m_di) / np.maximum(p_di + m_di, 1e-9))
+    adx = np.full(n, np.nan)
+    if n >= period * 2:
+        adx[period*2 - 1] = dx[period:period*2].mean()
+        for i in range(period*2, n):
+            adx[i] = (adx[i-1] * (period - 1) + dx[i]) / period
+    return adx
+
 def _nan(v): return v is None or (isinstance(v, float) and np.isnan(v))
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -351,13 +387,46 @@ def session_info():
     return {"utc_time": now.strftime("%H:%M:%S"), "session": s or "Off-hours",
             "trading_active": s is not None}
 
-def minutes_until_next_session():
+def is_ny_rollover_window():
     now  = _utc_now()
     h, m = now.hour, now.minute
-    if is_trading_session(): return 0
-    lo_h, lo_m = CFG["LONDON_OPEN"]
-    cur = h*60+m; lon = lo_h*60+lo_m
-    return (lon-cur) if cur < lon else (1440-cur+lon)
+    return (h == 20 and m >= 50) or (h == 21 and m <= 15)
+
+def is_prime_entry_window():
+    now  = _utc_now()
+    h, m = now.hour, now.minute
+    # Prime liquidity window for new entries: 07:00 to 16:00 UTC (London + London/NY overlap)
+    return (7, 0) <= (h, m) < (16, 0)
+
+def is_currency_correlated(candidate_inst, candidate_dir, open_trades):
+    """
+    Checks if opening candidate_inst in candidate_dir creates correlated directional
+    exposure with any currently open trade.
+    """
+    c_parts = candidate_inst.split("_")
+    if len(c_parts) != 2:
+        return False, ""
+    c_base, c_quote = c_parts[0], c_parts[1]
+    c_long  = c_base if candidate_dir == "BUY" else c_quote
+    c_short = c_quote if candidate_dir == "BUY" else c_base
+
+    for t in open_trades:
+        o_inst = t.get("instrument", "")
+        o_units = int(t.get("currentUnits") or t.get("initialUnits") or 1)
+        o_dir = "BUY" if o_units > 0 else "SELL"
+        o_parts = o_inst.split("_")
+        if len(o_parts) != 2:
+            continue
+        o_base, o_quote = o_parts[0], o_parts[1]
+        o_long  = o_base if o_dir == "BUY" else o_quote
+        o_short = o_quote if o_dir == "BUY" else o_base
+
+        if c_long == o_long:
+            return True, f"Correlated Long exposure on {c_long} with open {o_inst} ({o_dir})"
+        if c_short == o_short:
+            return True, f"Correlated Short exposure on {c_short} with open {o_inst} ({o_dir})"
+
+    return False, ""
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ── SECTION 5: TRADE TRACKER ─────────────────────────────────────────────────
@@ -1416,6 +1485,12 @@ class OandaClient:
     def close_trade(self, tid):
         return self._put(f"/v3/accounts/{self._aid()}/trades/{tid}/close",{})
 
+    def update_trade_stop_loss(self, tid, sl_price, instrument):
+        aid = self._aid()
+        fmt = f"{sl_price:.3f}" if "JPY" in instrument else (f"{sl_price:.2f}" if "XAU" in instrument else f"{sl_price:.5f}")
+        body = {"stopLoss": {"price": fmt, "timeInForce": "GTC"}}
+        return self._put(f"/v3/accounts/{aid}/trades/{tid}/orders", body)
+
     def calculate_units(self, instrument, sl_pips, risk_pct, balance=None, prices_hint=None):
         """
         prices_hint: optional dict of {instrument: {"mid": ...}} already
@@ -1437,7 +1512,22 @@ class OandaClient:
 # ── SECTION 9: STRATEGIES ────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _sl_tp(instrument, sl=None, tp=None):
+def _sl_tp(instrument, candles=None, sl=None, tp=None):
+    if sl and tp:
+        return sl, tp
+    if candles and len(candles) >= 20:
+        atr_vals = _atr(candles, 14)
+        atr_now  = atr_vals[-1] if len(atr_vals) > 0 else None
+        if atr_now and not _nan(atr_now) and atr_now > 0:
+            ps = _pip_size(instrument)
+            atr_pips = atr_now / ps
+            if "XAU" in instrument:
+                dynamic_sl = max(120.0, min(600.0, round(1.5 * atr_pips, 1)))
+                dynamic_tp = round(2.5 * dynamic_sl, 1)
+            else:
+                dynamic_sl = max(12.0, min(50.0, round(1.5 * atr_pips, 1)))
+                dynamic_tp = round(2.5 * dynamic_sl, 1)
+            return dynamic_sl, dynamic_tp
     if "XAU" in instrument:
         return sl or CFG["GOLD_SL_PIPS"], tp or CFG["GOLD_TP_PIPS"]
     return sl or CFG["DEFAULT_SL_PIPS"], tp or CFG["DEFAULT_TP_PIPS"]
@@ -1445,15 +1535,15 @@ def _sl_tp(instrument, sl=None, tp=None):
 def _strat_ema_cross(candles, instrument):
     c=_closes(candles); f=_ema(c,9); s=_ema(c,21); t=_ema(c,50); i=-1
     if any(_nan(v) for v in [f[i],f[i-1],s[i],s[i-1],t[i]]): return {"signal":None}
-    sl,tp=_sl_tp(instrument)
-    if f[i-1]<s[i-1] and f[i]>s[i] and c[i]>t[i]: return {"signal":"BUY","sl_pips":sl,"tp_pips":tp*1.5,"reason":"EMA_Cross: BUY"}
-    if f[i-1]>s[i-1] and f[i]<s[i] and c[i]<t[i]: return {"signal":"SELL","sl_pips":sl,"tp_pips":tp*1.5,"reason":"EMA_Cross: SELL"}
+    sl,tp=_sl_tp(instrument, candles)
+    if f[i-1]<s[i-1] and f[i]>s[i] and c[i]>t[i]: return {"signal":"BUY","sl_pips":sl,"tp_pips":tp,"reason":"EMA_Cross: BUY"}
+    if f[i-1]>s[i-1] and f[i]<s[i] and c[i]<t[i]: return {"signal":"SELL","sl_pips":sl,"tp_pips":tp,"reason":"EMA_Cross: SELL"}
     return {"signal":None}
 
 def _strat_rsi(candles, instrument):
     r=_rsi(_closes(candles),14); i=-1
     if _nan(r[i]) or _nan(r[i-1]): return {"signal":None}
-    sl,tp=_sl_tp(instrument)
+    sl,tp=_sl_tp(instrument, candles)
     if r[i-1]<30 and r[i]>30: return {"signal":"BUY","sl_pips":sl,"tp_pips":tp,"reason":f"RSI_Reversal: BUY ({r[i]:.1f})"}
     if r[i-1]>70 and r[i]<70: return {"signal":"SELL","sl_pips":sl,"tp_pips":tp,"reason":f"RSI_Reversal: SELL ({r[i]:.1f})"}
     return {"signal":None}
@@ -1461,31 +1551,26 @@ def _strat_rsi(candles, instrument):
 def _strat_bb(candles, instrument):
     c=_closes(candles); u,_m,l=_bollinger(c,20,2.0); i=-1
     if any(_nan(v) for v in [u[i],l[i]]): return {"signal":None}
-    sl,tp=_sl_tp(instrument)
-    if c[i]>u[i] and c[i-1]<=u[i-1]: return {"signal":"BUY","sl_pips":sl,"tp_pips":tp*2,"reason":"Bollinger_Break: BUY"}
-    if c[i]<l[i] and c[i-1]>=l[i-1]: return {"signal":"SELL","sl_pips":sl,"tp_pips":tp*2,"reason":"Bollinger_Break: SELL"}
+    sl,tp=_sl_tp(instrument, candles)
+    if c[i]>u[i] and c[i-1]<=u[i-1]: return {"signal":"BUY","sl_pips":sl,"tp_pips":tp,"reason":"Bollinger_Break: BUY"}
+    if c[i]<l[i] and c[i-1]>=l[i-1]: return {"signal":"SELL","sl_pips":sl,"tp_pips":tp,"reason":"Bollinger_Break: SELL"}
     return {"signal":None}
 
 def _strat_macd(candles, instrument):
     c=_closes(candles); ml,sl_,h=_macd(c); i=-1
     if any(_nan(v) for v in [ml[i],sl_[i],h[i],ml[i-1]]): return {"signal":None}
-    sl,tp=_sl_tp(instrument)
+    sl,tp=_sl_tp(instrument, candles)
     if ml[i-1]<sl_[i-1] and ml[i]>sl_[i] and h[i]>0: return {"signal":"BUY","sl_pips":sl,"tp_pips":tp,"reason":"MACD_Momentum: BUY"}
     if ml[i-1]>sl_[i-1] and ml[i]<sl_[i] and h[i]<0: return {"signal":"SELL","sl_pips":sl,"tp_pips":tp,"reason":"MACD_Momentum: SELL"}
     return {"signal":None}
 
 def _strat_session(candles, instrument):
-    """Session breakout: uses the 4-candle range ending 2 candles ago,
-    anchored by candle timestamps so it always covers a real session window
-    rather than a fixed offset that may drift on lower time-frames."""
     if len(candles) < 10: return {"signal": None}
     c = _closes(candles); h = _highs(candles); l = _lows(candles)
-    # Use candles[-8:-2] (6 candles back to 2 back) for a wider session window
-    # that remains meaningful on H1 charts (6h = full London session)
     window_h = h[-8:-2]; window_l = l[-8:-2]
     if len(window_h) == 0: return {"signal": None}
     rh = max(window_h); rl = min(window_l); cur = c[-1]
-    sl, tp = _sl_tp(instrument)
+    sl, tp = _sl_tp(instrument, candles)
     if cur > rh * 1.0005: return {"signal": "BUY",  "sl_pips": sl, "tp_pips": tp, "reason": "Session_Break: BUY"}
     if cur < rl * 0.9995: return {"signal": "SELL", "sl_pips": sl, "tp_pips": tp, "reason": "Session_Break: SELL"}
     return {"signal": None}
@@ -1873,6 +1958,19 @@ def apply_trade_filters(signal: str, candles: list, instrument: str) -> tuple:
                 reasons.append(
                     f"Volatility OK: ATR ({atr_now:.5f}) >= threshold ({atr_sma:.5f})"
                 )
+
+    # ── Filter 3: ADX Trend Strength ──────────────────────────────────────────
+    if passed and len(candles) >= 30:
+        adx_vals = _adx(candles, 14)
+        adx_now  = adx_vals[-1]
+        if not _nan(adx_now):
+            if adx_now < 20.0:
+                passed = False
+                reasons.append(
+                    f"ADX filter: ADX ({adx_now:.1f}) < 20.0 — weak trend / sideways market, skipping"
+                )
+            else:
+                reasons.append(f"ADX OK: ADX ({adx_now:.1f}) >= 20.0")
 
     return passed, reasons
 
@@ -5456,6 +5554,35 @@ def sync_trades():
         oanda_open_ids = {t["id"] for t in open_trades}
         closed_ids     = all_ledger_ids() - oanda_open_ids
 
+        # Breakeven Protection Sweep on all active open trades
+        for t in open_trades:
+            try:
+                tid   = str(t.get("id", ""))
+                inst  = t.get("instrument", "")
+                units = int(t.get("currentUnits") or 1)
+                dirn  = "BUY" if units > 0 else "SELL"
+                ep    = float(t.get("price") or 0)
+                sl_obj = t.get("stopLossOrder")
+                if not ep or not sl_obj:
+                    continue
+                sl_price = float(sl_obj.get("price") or 0)
+                ps = _pip_size(inst)
+                
+                price_info = _client.get_price(inst)
+                cp = price_info.get("bid" if dirn == "BUY" else "ask", ep)
+
+                moved_pips = (cp - ep) / ps if dirn == "BUY" else (ep - cp) / ps
+                sl_risk_pips = abs(ep - sl_price) / ps if sl_price > 0 else 20.0
+
+                if moved_pips >= sl_risk_pips:
+                    be_target = round(ep + ps if dirn == "BUY" else ep - ps, 5)
+                    is_behind_be = (sl_price < be_target) if dirn == "BUY" else (sl_price > be_target)
+                    if is_behind_be:
+                        _client.update_trade_stop_loss(tid, be_target, inst)
+                        log.info(f"🔒 [{inst}] Trade {tid} reached +{moved_pips:.1f} pips (+1.0x Risk profit) — Stop Loss moved to Breakeven ({be_target})!")
+            except Exception as be_err:
+                log.debug(f"Breakeven check for trade {t.get('id')}: {be_err}")
+
         if closed_ids:
             txns = _client.get_transactions(count=50)
             txn_map = {}
@@ -5540,6 +5667,12 @@ def trading_cycle():
         _last_session=session
     if not info["trading_active"]:
         log.info(f"⏸ Off-hours ({info['utc_time']} UTC) ~{minutes_until_next_session()} min to London"); return
+    if is_ny_rollover_window():
+        log.info("⏸ NY Rollover window (20:50-21:15 UTC) — pausing new trade entries to avoid rollover spread spikes")
+        return
+    if not is_prime_entry_window():
+        log.info("⏸ Outside prime entry window (07:00-16:00 UTC) — skipping new entries to avoid low-liquidity late NY hours")
+        return
     try: open_trades=_client.get_open_trades()
     except Exception as e: log.error(f"Fetch trades: {e}"); return
     if len(open_trades)>=CFG["MAX_OPEN_TRADES"]: log.info("Max trades reached"); return
@@ -5564,6 +5697,12 @@ def trading_cycle():
             # Apply trend + volatility filters silently
             con=filtered_signal(con,candles,instrument)
             if not con["signal"]: continue
+
+            # Currency correlation filter check
+            correlated, corr_reason = is_currency_correlated(instrument, con["signal"], open_trades)
+            if correlated:
+                log.info(f"[{instrument}] Skipped: {corr_reason}")
+                continue
 
             # News blackout check
             blocked, news_reason = is_news_blackout(instrument)

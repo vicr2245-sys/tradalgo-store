@@ -367,5 +367,43 @@ class TestAtomicWrite:
         assert json.loads(p.read_text()) == {"a": 1}
 
 
+class TestProtectionFilters:
+    def test_currency_correlation_blocks_same_direction_exposure(self):
+        open_trades = [
+            {"instrument": "USD_CHF", "currentUnits": "100000"},  # BUY USD_CHF: Long USD, Short CHF
+        ]
+        # Candidate 1: BUY USD_JPY -> Long USD, Short JPY -> correlated on Long USD!
+        corr, reason = tradalgo.is_currency_correlated("USD_JPY", "BUY", open_trades)
+        assert corr is True
+        assert "USD" in reason
+
+        # Candidate 2: SELL EUR_USD -> Short EUR, Long USD -> correlated on Long USD!
+        corr, reason = tradalgo.is_currency_correlated("EUR_USD", "SELL", open_trades)
+        assert corr is True
+        assert "USD" in reason
+
+    def test_currency_correlation_allows_uncorrelated_pairs(self):
+        open_trades = [
+            {"instrument": "USD_CHF", "currentUnits": "100000"},  # Long USD, Short CHF
+        ]
+        # Candidate: BUY EUR_GBP -> Long EUR, Short GBP -> no shared currency with USD_CHF
+        corr, reason = tradalgo.is_currency_correlated("EUR_GBP", "BUY", open_trades)
+        assert corr is False
+
+    def test_ny_rollover_window_timing(self):
+        # 20:55 UTC -> inside rollover window
+        import datetime
+        from unittest.mock import patch
+
+        fake_2055 = datetime.datetime(2026, 8, 12, 20, 55, 0, tzinfo=datetime.timezone.utc)
+        with patch.object(tradalgo, "_utc_now", return_value=fake_2055):
+            assert tradalgo.is_ny_rollover_window() is True
+
+        # 14:30 UTC -> outside rollover window
+        fake_1430 = datetime.datetime(2026, 8, 12, 14, 30, 0, tzinfo=datetime.timezone.utc)
+        with patch.object(tradalgo, "_utc_now", return_value=fake_1430):
+            assert tradalgo.is_ny_rollover_window() is False
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
