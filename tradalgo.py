@@ -619,6 +619,13 @@ def record_open(trade_id, instrument, direction, entry, units, sl, tp, strategy)
             "strategy": strategy, "opened_at": _utc_now().isoformat(),
         }
     _ledger_save()
+    try:
+        def _render_bg():
+            if _client:
+                c = _client.get_candles(instrument, "H1", 60)
+                render_trade_chart(trade_id, instrument, c, float(entry), float(sl or 0), float(tp or 0), direction, action="OPEN")
+        threading.Thread(target=_render_bg, daemon=True).start()
+    except Exception as e: log.debug(f"Render open chart bg: {e}")
 
 def seed_from_oanda(open_trades):
     added = 0
@@ -775,6 +782,16 @@ def record_close(trade_id, instrument, direction, entry, exit_price,
         if float(pl) > 0: _perf["daily"][today]["wins"]   += 1
         else:             _perf["daily"][today]["losses"]  += 1
     _perf_save()
+    try:
+        def _render_bg():
+            if _client:
+                c = _client.get_candles(instrument, "H1", 60)
+                le = get_ledger(trade_id)
+                sl = float(le.get("sl", 0))
+                tp = float(le.get("tp", 0))
+                render_trade_chart(trade_id, instrument, c, float(entry), sl, tp, direction, action="CLOSE", exit_price=float(exit_price))
+        threading.Thread(target=_render_bg, daemon=True).start()
+    except Exception as e: log.debug(f"Render close chart bg: {e}")
 
 def _compute_risk_ratios(days: int = None) -> dict:
     """
@@ -2277,6 +2294,207 @@ def run_backtest(instruments=None, granularity=None, candle_count=None, initial_
     bt_dir=DATA_DIR/"backtest_results"; bt_dir.mkdir(exist_ok=True)
     _atomic_write_json(bt_dir/f"backtest_{ts}.json", output)
     return output
+
+
+# ── SECTION 10b: TRADE CHART JOURNAL & WALK-FORWARD VALIDATION ────────────────
+
+CHARTS_DIR = DATA_DIR / "trade_charts"
+CHARTS_DIR.mkdir(exist_ok=True)
+
+def render_trade_chart(trade_id, instrument, candles, entry_price, sl_price, tp_price, direction, action="OPEN", exit_price=None):
+    """
+    Render a clean 2-pane candlestick chart with 200 EMA, 50 EMA,
+    entry line, SL line, TP line, and ADX panel. Saves to DATA_DIR/trade_charts/{trade_id}_{action}.png.
+    """
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+
+        if not candles or len(candles) < 20:
+            return
+
+        recent = candles[-60:]
+        n = len(recent)
+        closes = np.array([float(c.get('close') or c.get('mid',{}).get('c',0)) for c in recent])
+        highs  = np.array([float(c.get('high') or c.get('mid',{}).get('h',0)) for c in recent])
+        lows   = np.array([float(c.get('low') or c.get('mid',{}).get('l',0)) for c in recent])
+        opens  = np.array([float(c.get('open') or c.get('mid',{}).get('o',0)) for c in recent])
+
+        ema50  = _ema(closes, min(50, n-1))
+        ema200 = _ema(closes, min(200, n-1)) if len(candles) >= 200 else None
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
+        plt.subplots_adjust(hspace=0.08)
+
+        for idx in range(n):
+            c_open, c_close = opens[idx], closes[idx]
+            c_high, c_low   = highs[idx], lows[idx]
+            color = '#26a69a' if c_close >= c_open else '#ef5350'
+            ax1.plot([idx, idx], [c_low, c_high], color=color, linewidth=1.0)
+            rect_y = min(c_open, c_close)
+            rect_h = max(abs(c_close - c_open), (c_high - c_low) * 0.02)
+            rect = patches.Rectangle((idx - 0.3, rect_y), 0.6, rect_h, facecolor=color, edgecolor=color, alpha=0.9)
+            ax1.add_patch(rect)
+
+        ax1.plot(range(n), ema50, color='#2962FF', linewidth=1.2, label='50 EMA')
+        if ema200 is not None:
+            ax1.plot(range(n), ema200[-n:], color='#FF6D00', linewidth=1.2, label='200 EMA')
+
+        ax1.axhline(entry_price, color='#2962FF', linestyle='--', linewidth=1.5, label=f'Entry: {entry_price:.5f}')
+        if sl_price:
+            ax1.axhline(sl_price, color='#FF5252', linestyle=':', linewidth=1.5, label=f'SL: {sl_price:.5f}')
+        if tp_price:
+            ax1.axhline(tp_price, color='#00E676', linestyle=':', linewidth=1.5, label=f'TP: {tp_price:.5f}')
+        if exit_price:
+            ax1.axhline(exit_price, color='#E040FB', linestyle='-.', linewidth=1.5, label=f'Exit: {exit_price:.5f}')
+
+        ax1.set_title(f"Tradalgo Journal — {instrument} ({direction}) [{action}] | Trade #{trade_id}", fontsize=11, fontweight='bold')
+        ax1.legend(loc='upper left', fontsize=8)
+        ax1.grid(True, linestyle='--', alpha=0.3)
+
+        adx_vals = _adx(recent, 14)
+        ax2.plot(range(n), adx_vals, color='#AB47BC', linewidth=1.2, label='ADX(14)')
+        ax2.axhline(25.0, color='#78909C', linestyle='--', linewidth=1.0, label='Trend Threshold (25)')
+        ax2.set_ylim(0, 60)
+        ax2.legend(loc='upper left', fontsize=8)
+        ax2.grid(True, linestyle='--', alpha=0.3)
+
+        out_path = CHARTS_DIR / f"{trade_id}_{action}.png"
+        plt.savefig(out_path, dpi=120, bbox_inches='tight')
+        plt.close(fig)
+        log.info(f"📸 Trade chart journal saved: {out_path}")
+    except Exception as err:
+        log.debug(f"Trade chart render for {trade_id}: {err}")
+
+
+def run_walk_forward_validation(instrument="EUR_USD", total_candles=1500, is_candles=400, oos_candles=100, step_candles=100):
+    """
+    Executes Walk-Forward Optimization/Validation on historical candles.
+    Simulates rolling in-sample parameter selection and stitched out-of-sample execution.
+    Returns Walk-Forward Efficiency (WFE), total OOS return, and robustness verdict.
+    """
+    client = OandaClient()
+    try:
+        candles = client.get_candles(instrument, "H1", total_candles)
+    except Exception as e:
+        return {"error": f"Failed to fetch candles for {instrument}: {e}"}
+
+    if len(candles) < is_candles + oos_candles:
+        return {"error": f"Insufficient candles ({len(candles)}) for WFV parameters"}
+
+    n = len(candles)
+    is_results = []
+    oos_trades = []
+    oos_equity = [10000.0]
+    balance = 10000.0
+    pip = _pip_size(instrument)
+    spread_pips = _estimated_spread_pips(instrument)
+
+    threshold_grid = [0.35, 0.40, 0.45, 0.50, 0.55]
+
+    start_idx = 0
+    step_count = 0
+
+    while start_idx + is_candles + oos_candles <= n:
+        step_count += 1
+        is_window = candles[start_idx : start_idx + is_candles]
+        oos_window = candles[start_idx + is_candles : start_idx + is_candles + oos_candles]
+
+        # 1. Optimize on In-Sample window
+        best_thresh = 0.45
+        best_is_pnl = -999999.0
+        for thresh in threshold_grid:
+            is_bal = 10000.0
+            for i in range(60, len(is_window)):
+                sub = is_window[:i]
+                cur = is_window[i]
+                sr = run_all_strategies(sub, instrument)
+                con = consensus_signal(sr, CFG["STRATEGY_WEIGHTS"], threshold=thresh)
+                con = filtered_signal(con, sub, instrument)
+                if not con["signal"]: continue
+                sl_p, tp_p = con["sl_pips"], con["tp_pips"]
+                entry = cur["open"]
+                if con["signal"] == "BUY":
+                    sl_pr = entry - sl_p * pip; tp_pr = entry + tp_p * pip
+                    if cur["low"] <= sl_pr: pl = -sl_p * pip
+                    elif cur["high"] >= tp_pr: pl = tp_p * pip
+                    else: pl = cur["close"] - entry
+                else:
+                    sl_pr = entry + sl_p * pip; tp_pr = entry - tp_p * pip
+                    if cur["high"] >= sl_pr: pl = -sl_p * pip
+                    elif cur["low"] <= tp_pr: pl = tp_p * pip
+                    else: pl = entry - cur["close"]
+                pl -= spread_pips * pip
+                units = calculate_position_units(instrument, sl_p, CFG["RISK_PER_TRADE_PCT"], is_bal)
+                is_bal += pl * units
+            if is_bal > best_is_pnl:
+                best_is_pnl = is_bal
+                best_thresh = thresh
+
+        is_pnl_pct = ((best_is_pnl - 10000.0) / 10000.0) * 100.0
+        is_results.append(is_pnl_pct)
+
+        # 2. Test frozen best_thresh on Out-of-Sample window
+        for i in range(60, len(oos_window)):
+            sub = oos_window[:i]
+            cur = oos_window[i]
+            sr = run_all_strategies(sub, instrument)
+            con = consensus_signal(sr, CFG["STRATEGY_WEIGHTS"], threshold=best_thresh)
+            con = filtered_signal(con, sub, instrument)
+            if not con["signal"]:
+                oos_equity.append(balance)
+                continue
+            sl_p, tp_p = con["sl_pips"], con["tp_pips"]
+            entry = cur["open"]
+            if con["signal"] == "BUY":
+                sl_pr = entry - sl_p * pip; tp_pr = entry + tp_p * pip
+                if cur["low"] <= sl_pr: pl = -sl_p * pip; outcome = "SL"
+                elif cur["high"] >= tp_pr: pl = tp_p * pip; outcome = "TP"
+                else: pl = cur["close"] - entry; outcome = "close"
+            else:
+                sl_pr = entry + sl_p * pip; tp_pr = entry - tp_p * pip
+                if cur["high"] >= sl_pr: pl = -sl_p * pip; outcome = "SL"
+                elif cur["low"] <= tp_pr: pl = tp_p * pip; outcome = "TP"
+                else: pl = entry - cur["close"]; outcome = "close"
+            pl -= spread_pips * pip
+            units = calculate_position_units(instrument, sl_p, CFG["RISK_PER_TRADE_PCT"], balance)
+            pl_m = pl * units
+            balance = max(0, balance + pl_m)
+            oos_trades.append({"step": step_count, "time": cur["time"], "signal": con["signal"],
+                               "pl_pips": round(pl/pip, 1), "pl_money": round(pl_m, 2), "balance": round(balance, 2)})
+            oos_equity.append(balance)
+
+        start_idx += step_candles
+
+    total_oos_pnl_pct = ((balance - 10000.0) / 10000.0) * 100.0
+    avg_is_pnl_pct = sum(is_results) / len(is_results) if is_results else 1.0
+
+    wfe = round((total_oos_pnl_pct / max(avg_is_pnl_pct, 0.01)) * 100.0, 1)
+
+    if wfe >= 60.0:
+        verdict = "ROBUST (High generalization, WFE >= 60%)"
+    elif wfe >= 35.0:
+        verdict = "MODERATE (Acceptable stability, 35% <= WFE < 60%)"
+    else:
+        verdict = "OVERFITTED (Strategy alpha decays out-of-sample, WFE < 35%)"
+
+    wins = [t for t in oos_trades if t["pl_money"] > 0]
+    win_rate = round((len(wins) / max(len(oos_trades), 1)) * 100.0, 1)
+
+    return {
+        "instrument": instrument,
+        "wfv_steps": step_count,
+        "total_oos_trades": len(oos_trades),
+        "total_oos_pnl_pct": round(total_oos_pnl_pct, 2),
+        "avg_is_pnl_pct": round(avg_is_pnl_pct, 2),
+        "wfe_pct": wfe,
+        "oos_win_rate_pct": win_rate,
+        "verdict": verdict,
+        "oos_trades": oos_trades[-30:]
+    }
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ── SECTION 11: DASHBOARD ────────────────────────────────────────────────────
@@ -5305,6 +5523,33 @@ def route_backtest_run():
         )
         return jsonify(result)
     except Exception as e:
+        log.error(f"Backtest failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/wfv")
+def route_wfv():
+    """
+    Runs Walk-Forward Validation on a specified instrument.
+    Accepts: ?instrument=EUR_USD&candles=1500&is_candles=400&oos_candles=100
+    """
+    inst = request.args.get("instrument", "EUR_USD")
+    total_candles = int(request.args.get("candles", 1500))
+    is_candles = int(request.args.get("is_candles", 400))
+    oos_candles = int(request.args.get("oos_candles", 100))
+    step_candles = int(request.args.get("step_candles", 100))
+
+    try:
+        res = run_walk_forward_validation(
+            instrument=inst,
+            total_candles=total_candles,
+            is_candles=is_candles,
+            oos_candles=oos_candles,
+            step_candles=step_candles
+        )
+        return jsonify(res)
+    except Exception as e:
+        log.error(f"WFV route failed: {e}")
+        return jsonify({"error": str(e)}), 500
         import traceback
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 

@@ -461,5 +461,46 @@ class TestCircuitBreaker:
                 assert "daily loss" in reason.lower()
 
 
+class TestTradeChartJournal:
+    def test_render_trade_chart(self, tmp_path):
+        import matplotlib
+        matplotlib.use('Agg')
+        from unittest.mock import patch
+
+        candles = []
+        p = 1.1000
+        for i in range(30):
+            p += 0.0005 if i % 2 == 0 else -0.0003
+            candles.append({"close": p, "high": p + 0.0010, "low": p - 0.0010, "open": p - 0.0002,
+                            "mid": {"c": p, "h": p + 0.0010, "l": p - 0.0010, "o": p - 0.0002}})
+
+        with patch.object(tradalgo, "CHARTS_DIR", tmp_path):
+            tradalgo.render_trade_chart("999", "EUR_USD", candles, 1.1000, 1.0950, 1.1100, "BUY", action="OPEN")
+            chart_file = tmp_path / "999_OPEN.png"
+            assert chart_file.exists()
+            assert chart_file.stat().st_size > 1000
+
+
+class TestWalkForwardValidation:
+    def test_wfv_execution(self):
+        from unittest.mock import MagicMock, patch
+
+        candles = []
+        p = 1.1000
+        for i in range(250):
+            p += 0.0002 if (i // 10) % 2 == 0 else -0.0001
+            candles.append({"close": p, "high": p + 0.0005, "low": p - 0.0005, "open": p, "time": f"2026-08-01T{i%24:02d}:00:00Z",
+                            "mid": {"c": p, "h": p + 0.0005, "l": p - 0.0005, "o": p}})
+
+        mock_client = MagicMock()
+        mock_client.get_candles.return_value = candles
+
+        with patch.object(tradalgo, "OandaClient", return_value=mock_client):
+            res = tradalgo.run_walk_forward_validation("EUR_USD", total_candles=220, is_candles=120, oos_candles=30, step_candles=50)
+            assert "wfe_pct" in res
+            assert "verdict" in res
+            assert res["wfv_steps"] > 0
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
