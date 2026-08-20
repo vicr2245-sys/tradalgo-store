@@ -136,6 +136,10 @@ _DEFAULT_CONFIG = {
     "AI_BIAS_API_KEY":      "",
     "AI_BIAS_LAST_RUN":     "",
     "AI_BIAS_DATA":         {},
+    "CIRCUIT_BREAKER_ENABLED":        True,
+    "CIRCUIT_BREAKER_DAILY_MAX_LOSS":  3.0,    # Pause trading after 3% daily drawdown
+    "CIRCUIT_BREAKER_CONSEC_LOSSES":   3,      # Pause after 3 consecutive losing trades
+    "CIRCUIT_BREAKER_COOLDOWN_MINS":   60,     # Cooldown period in minutes after trip
 }
 
 # ── Secrets ───────────────────────────────────────────────────────────────
@@ -359,6 +363,79 @@ def _adx(candles, period=14):
             adx[i] = (adx[i-1] * (period - 1) + dx[i]) / period
     return adx
 
+# ── Regime Detection ─────────────────────────────────────────────────────────
+# Classifies the market into 4 quadrants:
+#   Q1 STEADY_TREND   — High trend + Low vol  → full trend-following, tight stops
+#   Q2 VOLATILE_TREND  — High trend + High vol → trend-following, WIDER stops
+#   Q3 STAGNANT_CHOP   — Low trend  + Low vol  → NO TRADE (sit in cash)
+#   Q4 MEAN_REVERT     — Low trend  + High vol → mean-reversion only (RSI, BB)
+
+REGIME_STEADY_TREND  = "STEADY_TREND"
+REGIME_VOLATILE_TREND = "VOLATILE_TREND"
+REGIME_STAGNANT_CHOP = "STAGNANT_CHOP"
+REGIME_MEAN_REVERT   = "MEAN_REVERT"
+
+_REGIME_ADX_THRESHOLD = 25.0   # ADX >= 25 = trending; < 25 = ranging
+_REGIME_BBW_LOOKBACK  = 50     # lookback for average BBW
+_REGIME_BBW_RATIO     = 1.5    # BBW >= 1.5x average = high volatility
+
+def detect_regime(candles, period_adx=14, period_bb=20) -> dict:
+    """
+    Classify the current market regime using ADX (trend strength) and
+    Bollinger Band Width ratio (volatility relative to recent average).
+
+    Returns {"regime": str, "adx": float, "bbw_ratio": float, "detail": str}
+    """
+    fallback = {"regime": REGIME_STEADY_TREND, "adx": 0.0, "bbw_ratio": 1.0,
+                "detail": "Insufficient data — defaulting to STEADY_TREND"}
+    if len(candles) < max(period_adx * 2, period_bb + _REGIME_BBW_LOOKBACK):
+        return fallback
+
+    # ADX for trend strength
+    adx_vals = _adx(candles, period_adx)
+    adx_now = adx_vals[-1]
+    if _nan(adx_now):
+        return fallback
+
+    # Bollinger Band Width for volatility regime
+    c = _closes(candles)
+    upper, mid, lower = _bollinger(c, period_bb, 2.0)
+    bbw = np.full_like(c, np.nan)
+    for i in range(len(c)):
+        if not _nan(upper[i]) and not _nan(lower[i]) and not _nan(mid[i]) and mid[i] > 1e-9:
+            bbw[i] = (upper[i] - lower[i]) / mid[i]
+
+    # Current BBW vs. average of last _REGIME_BBW_LOOKBACK bars
+    bbw_now = bbw[-1]
+    valid_bbw = [v for v in bbw[-_REGIME_BBW_LOOKBACK:] if not _nan(v)]
+    if _nan(bbw_now) or len(valid_bbw) < 10:
+        return fallback
+    bbw_avg = sum(valid_bbw) / len(valid_bbw)
+    bbw_ratio = bbw_now / bbw_avg if bbw_avg > 1e-9 else 1.0
+
+    # Classify into quadrant
+    is_trending = adx_now >= _REGIME_ADX_THRESHOLD
+    is_volatile = bbw_ratio >= _REGIME_BBW_RATIO
+
+    if is_trending and not is_volatile:
+        regime = REGIME_STEADY_TREND
+        detail = f"Q1 Steady Trend: ADX={adx_now:.1f} (trending), BBW ratio={bbw_ratio:.2f}x (calm)"
+    elif is_trending and is_volatile:
+        regime = REGIME_VOLATILE_TREND
+        detail = f"Q2 Volatile Trend: ADX={adx_now:.1f} (trending), BBW ratio={bbw_ratio:.2f}x (volatile)"
+    elif not is_trending and not is_volatile:
+        regime = REGIME_STAGNANT_CHOP
+        detail = f"Q3 Stagnant Chop: ADX={adx_now:.1f} (no trend), BBW ratio={bbw_ratio:.2f}x (calm) — NO TRADE"
+    else:
+        regime = REGIME_MEAN_REVERT
+        detail = f"Q4 Mean-Revert: ADX={adx_now:.1f} (no trend), BBW ratio={bbw_ratio:.2f}x (volatile) — mean-reversion only"
+
+    return {"regime": regime, "adx": round(adx_now, 1), "bbw_ratio": round(bbw_ratio, 2), "detail": detail}
+
+# Strategies classified by type for regime-aware routing
+_TREND_STRATEGIES = {"EMA_Cross", "MACD_Momentum", "Session_Break"}
+_MEAN_REVERT_STRATEGIES = {"RSI_Reversal", "Bollinger_Break"}
+
 def _nan(v): return v is None or (isinstance(v, float) and np.isnan(v))
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -425,6 +502,76 @@ def is_currency_correlated(candidate_inst, candidate_dir, open_trades):
             return True, f"Correlated Long exposure on {c_long} with open {o_inst} ({o_dir})"
         if c_short == o_short:
             return True, f"Correlated Short exposure on {c_short} with open {o_inst} ({o_dir})"
+
+    return False, ""
+
+# ── Circuit Breaker ──────────────────────────────────────────────────────────
+# Automatically pauses trading when:
+#   1. Daily realized P&L exceeds CIRCUIT_BREAKER_DAILY_MAX_LOSS % of account balance
+#   2. The last N trades are all losses (N = CIRCUIT_BREAKER_CONSEC_LOSSES)
+# After tripping, trading pauses for CIRCUIT_BREAKER_COOLDOWN_MINS minutes.
+
+_circuit_breaker_tripped_at: float = 0.0  # timestamp when last tripped
+
+def is_circuit_breaker_tripped() -> tuple:
+    """
+    Check if the circuit breaker has been tripped.
+    Returns (tripped: bool, reason: str)
+    """
+    global _circuit_breaker_tripped_at
+
+    if not CFG.get("CIRCUIT_BREAKER_ENABLED", True):
+        return False, ""
+
+    # Check cooldown — if we're still in cooldown from a prior trip, stay tripped
+    cooldown_mins = float(CFG.get("CIRCUIT_BREAKER_COOLDOWN_MINS", 60))
+    if _circuit_breaker_tripped_at > 0:
+        elapsed = (time.time() - _circuit_breaker_tripped_at) / 60.0
+        if elapsed < cooldown_mins:
+            remaining = round(cooldown_mins - elapsed)
+            return True, f"🛑 Circuit breaker cooldown: {remaining} min remaining (tripped at {time.strftime('%H:%M UTC', time.gmtime(_circuit_breaker_tripped_at))})"
+        else:
+            _circuit_breaker_tripped_at = 0  # cooldown expired, reset
+
+    today = _utc_now().strftime("%Y-%m-%d")
+
+    # Check 1: Daily loss limit
+    max_loss_pct = float(CFG.get("CIRCUIT_BREAKER_DAILY_MAX_LOSS", 3.0))
+    with _perf_lock:
+        daily = _perf.get("daily", {}).get(today, {})
+        daily_pl = float(daily.get("pl", 0.0))
+
+    if daily_pl < 0:
+        try:
+            balance = _client.get_balance()
+        except Exception:
+            balance = 10000  # safe fallback
+        loss_pct = abs(daily_pl) / max(balance, 1) * 100
+        if loss_pct >= max_loss_pct:
+            _circuit_breaker_tripped_at = time.time()
+            reason = (f"🛑 CIRCUIT BREAKER: Daily loss {daily_pl:+.2f} ({loss_pct:.1f}%) "
+                      f"exceeds {max_loss_pct:.1f}% limit — pausing trading for {int(cooldown_mins)} min")
+            log.warning(reason)
+            return True, reason
+
+    # Check 2: Consecutive losses
+    max_consec = int(CFG.get("CIRCUIT_BREAKER_CONSEC_LOSSES", 3))
+    with _perf_lock:
+        trades = _perf.get("trades", [])
+
+    if len(trades) >= max_consec:
+        recent = trades[-max_consec:]
+        all_losses = all(float(t.get("pl", 0)) < 0 for t in recent)
+        if all_losses:
+            # Only trip if the most recent loss was today (don't carry over from yesterday)
+            last_closed = recent[-1].get("closed_at", "")
+            if today in last_closed:
+                _circuit_breaker_tripped_at = time.time()
+                total_loss = sum(float(t.get("pl", 0)) for t in recent)
+                reason = (f"🛑 CIRCUIT BREAKER: {max_consec} consecutive losses "
+                          f"(total {total_loss:+.2f}) — pausing trading for {int(cooldown_mins)} min")
+                log.warning(reason)
+                return True, reason
 
     return False, ""
 
@@ -1512,7 +1659,7 @@ class OandaClient:
 # ── SECTION 9: STRATEGIES ────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _sl_tp(instrument, candles=None, sl=None, tp=None):
+def _sl_tp(instrument, candles=None, sl=None, tp=None, regime=None):
     if sl and tp:
         return sl, tp
     if candles and len(candles) >= 20:
@@ -1521,12 +1668,21 @@ def _sl_tp(instrument, candles=None, sl=None, tp=None):
         if atr_now and not _nan(atr_now) and atr_now > 0:
             ps = _pip_size(instrument)
             atr_pips = atr_now / ps
-            if "XAU" in instrument:
-                dynamic_sl = max(120.0, min(600.0, round(1.5 * atr_pips, 1)))
-                dynamic_tp = round(2.5 * dynamic_sl, 1)
+
+            # Regime-adaptive ATR multipliers
+            if regime == REGIME_VOLATILE_TREND:
+                sl_mult, tp_mult = 2.5, 2.0   # Wider stops to survive vol, tighter TP ratio
+            elif regime == REGIME_MEAN_REVERT:
+                sl_mult, tp_mult = 2.0, 1.5   # Wide stops, tight targets for reversion
             else:
-                dynamic_sl = max(12.0, min(50.0, round(1.5 * atr_pips, 1)))
-                dynamic_tp = round(2.5 * dynamic_sl, 1)
+                sl_mult, tp_mult = 1.5, 2.5   # Default (STEADY_TREND): tight stops, wide targets
+
+            if "XAU" in instrument:
+                dynamic_sl = max(120.0, min(600.0, round(sl_mult * atr_pips, 1)))
+                dynamic_tp = round(tp_mult * dynamic_sl, 1)
+            else:
+                dynamic_sl = max(12.0, min(50.0, round(sl_mult * atr_pips, 1)))
+                dynamic_tp = round(tp_mult * dynamic_sl, 1)
             return dynamic_sl, dynamic_tp
     if "XAU" in instrument:
         return sl or CFG["GOLD_SL_PIPS"], tp or CFG["GOLD_TP_PIPS"]
@@ -1600,12 +1756,12 @@ def consensus_signal(results, weights, threshold=0.45):  # Raised from 0.35 — 
     if buy>=threshold and buy>sell:
         top=max((n for n,r in results.items() if r.get("signal")=="BUY"),key=lambda n:weights.get(n,0),default=None)
         if top: sl=results[top].get("sl_pips",sl); tp=results[top].get("tp_pips",tp)
-        return {"signal":"BUY","score":round(buy,3),"sl_pips":sl,"tp_pips":tp,"reasons":reasons}
+        return {"signal":"BUY","score":round(buy,3),"sl_pips":sl,"tp_pips":tp,"reasons":reasons,"_raw_results":results}
     if sell>=threshold and sell>buy:
         top=max((n for n,r in results.items() if r.get("signal")=="SELL"),key=lambda n:weights.get(n,0),default=None)
         if top: sl=results[top].get("sl_pips",sl); tp=results[top].get("tp_pips",tp)
-        return {"signal":"SELL","score":round(sell,3),"sl_pips":sl,"tp_pips":tp,"reasons":reasons}
-    return {"signal":None,"score":0,"sl_pips":sl,"tp_pips":tp,"reasons":reasons}
+        return {"signal":"SELL","score":round(sell,3),"sl_pips":sl,"tp_pips":tp,"reasons":reasons,"_raw_results":results}
+    return {"signal":None,"score":0,"sl_pips":sl,"tp_pips":tp,"reasons":reasons,"_raw_results":results}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ── SECTION 8d: NEWS FILTER ──────────────────────────────────────────────────
@@ -1900,22 +2056,43 @@ _FILTER_ATR_SMA     = 20   # SMA of ATR to compare against
 _FILTER_TREND_EMA   = 200  # trend EMA period
 
 
-def apply_trade_filters(signal: str, candles: list, instrument: str) -> tuple:
+def apply_trade_filters(signal: str, candles: list, instrument: str,
+                        strategy_name: str = "") -> tuple:
     """
-    Apply both filters to a proposed signal.
-    Returns (passed: bool, reasons: list[str])
+    Apply regime detection and trend/volatility filters to a proposed signal.
+    Returns (passed: bool, reasons: list[str], regime_info: dict)
 
     Called after consensus_signal() has produced a BUY or SELL.
-    If either filter rejects the signal, the trade is skipped.
+    If any filter rejects the signal, the trade is skipped.
     """
+    empty_regime = {"regime": REGIME_STEADY_TREND, "adx": 0.0, "bbw_ratio": 1.0, "detail": ""}
     if not signal or len(candles) < _FILTER_TREND_EMA + 5:
-        return True, []   # not enough data to filter — pass through
+        return True, [], empty_regime   # not enough data to filter — pass through
 
     c      = _closes(candles)
     passed = True
     reasons = []
 
-    # ── Filter 1: 200 EMA trend alignment ────────────────────────────────────
+    # ── Filter 1: Market Regime Detection ─────────────────────────────────────
+    regime_info = detect_regime(candles)
+    regime = regime_info["regime"]
+    reasons.append(f"Regime: {regime_info['detail']}")
+
+    if regime == REGIME_STAGNANT_CHOP:
+        passed = False
+        reasons.append(
+            f"🚫 REGIME BLOCK: {regime} — no directional edge in low-vol choppy market, sitting in cash"
+        )
+        return passed, reasons, regime_info
+
+    if regime == REGIME_MEAN_REVERT and strategy_name in _TREND_STRATEGIES:
+        passed = False
+        reasons.append(
+            f"🚫 REGIME BLOCK: {regime} — trend strategy '{strategy_name}' disabled in mean-reverting market"
+        )
+        return passed, reasons, regime_info
+
+    # ── Filter 2: 200 EMA trend alignment ────────────────────────────────────
     ema200 = _ema(c, _FILTER_TREND_EMA)
     price  = c[-1]
     ema_val = ema200[-1]
@@ -1938,7 +2115,7 @@ def apply_trade_filters(signal: str, candles: list, instrument: str) -> tuple:
                 f"Trend OK: price {'above' if signal=='BUY' else 'below'} 200 EMA"
             )
 
-    # ── Filter 2: ATR volatility — only run if trend filter passed ────────────
+    # ── Filter 3: ATR volatility — only run if trend filter passed ────────────
     if passed:
         atr_vals = _atr(candles, _FILTER_ATR_PERIOD)
         atr_now  = atr_vals[-1]
@@ -1947,7 +2124,7 @@ def apply_trade_filters(signal: str, candles: list, instrument: str) -> tuple:
         valid_atr = [v for v in atr_vals[-_FILTER_ATR_SMA:] if not _nan(v)]
         if len(valid_atr) >= _FILTER_ATR_SMA // 2 and not _nan(atr_now):
             atr_sma = sum(valid_atr) / len(valid_atr)
-            if atr_sma < 1e-8: pass  # Guard: skip filter if ATR SMA is near-zero (extremely low-vol pair)
+            if atr_sma < 1e-8: pass  # Guard: skip filter if ATR SMA is near-zero
             elif atr_now < atr_sma * 0.85:   # at least 85% of average volatility
                 passed = False
                 reasons.append(
@@ -1959,46 +2136,55 @@ def apply_trade_filters(signal: str, candles: list, instrument: str) -> tuple:
                     f"Volatility OK: ATR ({atr_now:.5f}) >= threshold ({atr_sma:.5f})"
                 )
 
-    # ── Filter 3: ADX Trend Strength ──────────────────────────────────────────
-    if passed and len(candles) >= 30:
-        adx_vals = _adx(candles, 14)
-        adx_now  = adx_vals[-1]
-        if not _nan(adx_now):
-            if adx_now < 20.0:
-                passed = False
-                reasons.append(
-                    f"ADX filter: ADX ({adx_now:.1f}) < 20.0 — weak trend / sideways market, skipping"
-                )
-            else:
-                reasons.append(f"ADX OK: ADX ({adx_now:.1f}) >= 20.0")
-
-    return passed, reasons
+    return passed, reasons, regime_info
 
 
 def filtered_signal(consensus: dict, candles: list, instrument: str) -> dict:
     """
-    Wraps consensus_signal output with the two filters.
+    Wraps consensus_signal output with regime detection and filters.
     Returns the same dict shape as consensus_signal() — callers need no changes
     except to call this instead of using the consensus result directly.
+
+    Adds 'regime' and 'regime_detail' keys to the returned dict.
     """
     sig = consensus.get("signal")
     if not sig:
         return consensus   # nothing to filter
 
-    passed, filter_reasons = apply_trade_filters(sig, candles, instrument)
+    # Determine the dominant strategy name for regime routing
+    top_strat = ""
+    for name, res in consensus.get("_raw_results", {}).items():
+        if res.get("signal") == sig:
+            top_strat = name
+            break
+
+    passed, filter_reasons, regime_info = apply_trade_filters(
+        sig, candles, instrument, strategy_name=top_strat
+    )
+
+    result = {**consensus,
+              "regime": regime_info["regime"],
+              "regime_detail": regime_info["detail"]}
 
     if not passed:
         for r in filter_reasons:
             log.debug(f"[{instrument}] {r}")
         # Return a copy with signal nulled — preserves score/sl/tp for logging
-        return {**consensus, "signal": None,
+        return {**result, "signal": None,
                 "reasons": consensus.get("reasons", []) + filter_reasons,
                 "filtered": True}
 
     for r in filter_reasons:
         log.debug(f"[{instrument}] {r}")
 
-    return {**consensus, "filtered": False}
+    # Adapt SL/TP to the detected regime
+    regime = regime_info["regime"]
+    if regime in (REGIME_VOLATILE_TREND, REGIME_MEAN_REVERT):
+        new_sl, new_tp = _sl_tp(instrument, candles, regime=regime)
+        result["sl_pips"] = new_sl
+        result["tp_pips"] = new_tp
+
+    return {**result, "filtered": False}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -5225,9 +5411,16 @@ def route_why_no_trades():
         "instruments":    {},
     }
 
-    # If paused or no slots, no need to go further
+    cb_tripped, cb_reason = is_circuit_breaker_tripped()
+    result["circuit_breaker"] = {"tripped": cb_tripped, "reason": cb_reason}
+
+    # If paused, circuit-breaker tripped, or no slots, no need to go further
     if result["paused"]:
         result["verdict"] = "Bot is PAUSED — press Resume to start trading again"
+        return jsonify(result)
+
+    if cb_tripped:
+        result["verdict"] = f"Circuit Breaker TRIPPED — {cb_reason}"
         return jsonify(result)
 
     if not result["session"]["trading_active"]:
@@ -5672,6 +5865,10 @@ def trading_cycle():
         return
     if not is_prime_entry_window():
         log.info("⏸ Outside prime entry window (07:00-16:00 UTC) — skipping new entries to avoid low-liquidity late NY hours")
+        return
+    tripped, cb_reason = is_circuit_breaker_tripped()
+    if tripped:
+        log.info(cb_reason)
         return
     try: open_trades=_client.get_open_trades()
     except Exception as e: log.error(f"Fetch trades: {e}"); return

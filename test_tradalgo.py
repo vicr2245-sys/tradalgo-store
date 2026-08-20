@@ -405,5 +405,61 @@ class TestProtectionFilters:
             assert tradalgo.is_ny_rollover_window() is False
 
 
+class TestRegimeDetection:
+    def test_detect_regime_insufficient_data(self):
+        candles = [{"close": 1.1000, "high": 1.1010, "low": 1.0990, "mid": {"c": 1.1000, "h": 1.1010, "l": 1.0990}} for _ in range(10)]
+        res = tradalgo.detect_regime(candles)
+        assert res["regime"] == tradalgo.REGIME_STEADY_TREND
+
+    def test_stagnant_chop_blocks_all_signals(self):
+        # Create flat/choppy candles (small range, no trend) - need > 205 candles for trend filter
+        candles = []
+        p = 1.1000
+        for i in range(215):
+            p += 0.0001 if i % 2 == 0 else -0.0001
+            candles.append({"close": p, "high": p + 0.0002, "low": p - 0.0002,
+                            "mid": {"c": p, "h": p + 0.0002, "l": p - 0.0002}})
+
+        passed, reasons, regime_info = tradalgo.apply_trade_filters("BUY", candles, "EUR_USD")
+        assert passed is False
+        assert any("REGIME BLOCK" in r for r in reasons)
+
+
+class TestCircuitBreaker:
+    def test_circuit_breaker_consecutive_losses(self):
+        from unittest.mock import patch
+
+        tradalgo._circuit_breaker_tripped_at = 0.0
+        today = tradalgo._utc_now().strftime("%Y-%m-%d")
+        mock_trades = [
+            {"id": "1", "pl": -50.0, "closed_at": f"{today}T10:00:00Z"},
+            {"id": "2", "pl": -40.0, "closed_at": f"{today}T11:00:00Z"},
+            {"id": "3", "pl": -30.0, "closed_at": f"{today}T12:00:00Z"},
+        ]
+
+        with patch.dict(tradalgo._perf, {"trades": mock_trades, "daily": {}}):
+            tripped, reason = tradalgo.is_circuit_breaker_tripped()
+            assert tripped is True
+            assert "consecutive losses" in reason.lower()
+
+    def test_circuit_breaker_daily_loss_limit(self):
+        from unittest.mock import MagicMock, patch
+
+        tradalgo._circuit_breaker_tripped_at = 0.0
+        today = tradalgo._utc_now().strftime("%Y-%m-%d")
+
+        mock_daily = {
+            today: {"trades": 5, "wins": 1, "losses": 4, "pl": -400.0}
+        }
+        mock_client = MagicMock()
+        mock_client.get_balance.return_value = 10000.0
+
+        with patch.dict(tradalgo._perf, {"trades": [], "daily": mock_daily}):
+            with patch.object(tradalgo, "_client", mock_client):
+                tripped, reason = tradalgo.is_circuit_breaker_tripped()
+                assert tripped is True
+                assert "daily loss" in reason.lower()
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
